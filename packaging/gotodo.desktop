@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=gotodo
+Comment=Calm, encrypted to-do manager
+Exec=gotodo
+Icon=gotodo
+Terminal=false
+Categories=Office;ProjectManagement;
+StartupWMClass=gotodo
+Actions=QuickEntry;
+
+[Desktop Action QuickEntry]
+Name=Quick Entry
+Exec=gotodo quick
