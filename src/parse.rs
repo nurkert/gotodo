@@ -4,6 +4,7 @@
 
 use chrono::{Datelike, Days, Months, NaiveDate, NaiveTime, Weekday};
 
+use crate::i18n::{t, weekday_name};
 use crate::model::{Id, Library, MoveTarget, Schedule};
 use crate::recurrence::{End, Freq, RepeatRule, weekday_index};
 
@@ -353,8 +354,36 @@ pub fn completions(input: &str, lib: &Library) -> Vec<(String, String)> {
             .take(5)
             .map(|(_, title)| (format!("@{}", compact(&title)), title))
             .collect(),
+        Some('!') => preset_words(rest, &[
+            ("today", t("Today")),
+            ("tomorrow", t("Tomorrow")),
+            ("evening", t("This Evening")),
+            ("someday", t("Someday")),
+            ("anytime", t("Anytime")),
+        ])
+        .into_iter()
+        .map(|(word, title)| (format!("!{word}"), title))
+        .collect(),
+        Some('^') => preset_words(rest, &[
+            ("today", t("Today")),
+            ("tomorrow", t("Tomorrow")),
+            ("monday", weekday_name(0)),
+            ("friday", weekday_name(4)),
+        ])
+        .into_iter()
+        .map(|(word, title)| (format!("^{word}"), title))
+        .collect(),
         _ => Vec::new(),
     }
+}
+
+fn preset_words(rest: &str, presets: &[(&'static str, &'static str)]) -> Vec<(&'static str, String)> {
+    let rest = rest.to_lowercase();
+    presets
+        .iter()
+        .filter(|(word, _)| word.starts_with(&rest))
+        .map(|(word, title)| (*word, (*title).to_owned()))
+        .collect()
 }
 
 pub fn apply_completion(input: &str, replacement: &str) -> String {

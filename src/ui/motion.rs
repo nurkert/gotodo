@@ -20,11 +20,18 @@ pub struct Spring {
     pub value: f32,
     velocity: f32,
     pub target: f32,
+    stiffness: f32,
+    damping: f32,
 }
 
 impl Spring {
     pub fn at(value: f32) -> Self {
-        Self { value, velocity: 0.0, target: value }
+        Self { value, velocity: 0.0, target: value, stiffness: STIFFNESS, damping: DAMPING }
+    }
+
+    /// A snappier spring for small surfaces such as the Quick Entry popup.
+    pub fn quick(value: f32) -> Self {
+        Self { stiffness: 1100.0, damping: 62.0, ..Self::at(value) }
     }
 
     pub fn to(&mut self, target: f32) {
@@ -48,7 +55,7 @@ impl Spring {
         let mut left = dt.min(0.1);
         while left > 0.0 {
             let h = left.min(STEP);
-            let force = STIFFNESS * (self.target - self.value) - DAMPING * self.velocity;
+            let force = self.stiffness * (self.target - self.value) - self.damping * self.velocity;
             self.velocity += force * h;
             self.value += self.velocity * h;
             left -= h;

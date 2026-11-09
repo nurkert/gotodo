@@ -42,6 +42,8 @@ type Task2 = IcedTask<Message>;
 type Slot<T> = Arc<Mutex<Option<T>>>;
 
 const QUICK_SIZE: Size = Size::new(580.0, 102.0);
+/// The popup opens at this height and grows to QUICK_SIZE.
+const QUICK_MIN_HEIGHT: f32 = 44.0;
 const LOG_DELAY: Duration = Duration::from_millis(1100);
 
 #[derive(Clone)]
@@ -105,6 +107,7 @@ pub enum Message {
     QuickInput(String),
     QuickSubmit,
     QuickComplete(usize),
+    QuickToken(char),
     Ignored,
 }
 
@@ -277,8 +280,8 @@ fn main_settings() -> window::Settings {
 /// being tiled. It stays opaque because software rendering has no alpha.
 fn quick_settings() -> window::Settings {
     window::Settings {
-        size: QUICK_SIZE,
-        min_size: Some(QUICK_SIZE),
+        size: Size::new(QUICK_SIZE.width, QUICK_MIN_HEIGHT),
+        min_size: Some(Size::new(QUICK_SIZE.width, QUICK_MIN_HEIGHT)),
         max_size: Some(QUICK_SIZE),
         resizable: false,
         decorations: false,
@@ -326,7 +329,7 @@ impl App {
             view_anim: Spring::at(1.0),
             sheet: None,
             sheet_anim: Spring::at(0.0),
-            quick_anim: Spring::at(1.0),
+            quick_anim: Spring::quick(1.0),
             quick_closing: false,
             query: String::new(),
             sheet_index: 0,
@@ -365,7 +368,7 @@ impl App {
         self.quick = Some(id);
         self.quick_text.clear();
         self.quick_closing = false;
-        self.quick_anim = Spring::at(0.0);
+        self.quick_anim = Spring::quick(0.0);
         self.quick_anim.to(1.0);
         open.map(Message::Opened)
     }
@@ -1389,6 +1392,12 @@ impl App {
         self.view_anim.step(dt, reduce);
         self.sheet_anim.step(dt, reduce);
         self.quick_anim.step(dt, reduce);
+        let mut tasks = Vec::new();
+        if let Some(id) = self.quick.filter(|_| !(self.quick_closing && self.quick_anim.settled())) {
+            let k = self.quick_anim.value.clamp(0.0, 1.0);
+            let height = QUICK_MIN_HEIGHT + (QUICK_SIZE.height - QUICK_MIN_HEIGHT) * k;
+            tasks.push(window::resize(id, Size::new(QUICK_SIZE.width, height)));
+        }
         if self.sheet_anim.settled() && self.sheet_anim.target < 0.5 {
             self.sheet = None;
         }
@@ -1422,7 +1431,7 @@ impl App {
                 return window::close(id);
             }
         }
-        IcedTask::none()
+        IcedTask::batch(tasks)
     }
 
     fn change_setting(&mut self, change: SettingChange) {
@@ -1795,6 +1804,13 @@ impl App {
             Message::QuickInput(value) => self.quick_text = value,
             Message::QuickSubmit => return self.submit_quick(),
             Message::QuickComplete(index) => return self.complete_quick(index),
+            Message::QuickToken(marker) => {
+                if !self.quick_text.is_empty() && !self.quick_text.ends_with(' ') {
+                    self.quick_text.push(' ');
+                }
+                self.quick_text.push(marker);
+                return IcedTask::batch([operation::focus(quick_id()), operation::move_cursor_to_end(quick_id())]);
+            }
             Message::Ignored => {}
         }
         IcedTask::none()

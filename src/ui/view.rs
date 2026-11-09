@@ -293,9 +293,18 @@ impl App {
                 .into(),
             t(if p.dark { "Light" } else { "Dark" }).to_owned(),
         );
+        let key_toggle = self.with_tip(
+            button(icon(Icon::Key, 17, if self.has_vault_keepass() { p.green } else { p.muted }))
+                .padding(7)
+                .on_press(Message::Command(Cmd::ConnectKeePass))
+                .style(style::quiet_button(p, false))
+                .into(),
+            t("Unlock with KeePassXC").to_owned(),
+        );
         let footer = row![
             self.tool_button(Icon::Plus, Cmd::NewProject),
             space().width(Length::Fill),
+            key_toggle,
             theme_toggle,
             self.tool_button(Icon::Lock, Cmd::Lock),
             self.tool_button(Icon::Gear, Cmd::Settings),
@@ -1099,11 +1108,23 @@ impl App {
         for (_, name) in draft.tags {
             add(Icon::Tag, name, p.teal);
         }
-        if !chips.is_empty() {
-            Row::with_children(chips).spacing(6).align_y(Alignment::Center).into()
-        } else {
-            label("#project  @tag  !when  ^deadline", 12.5, p.faint).into()
-        }
+        let token = |which: Icon, words: &'static str, marker: char| -> El<'static> {
+            button(row![icon(which, 13, p.muted), label(t(words), 12, p.muted)].spacing(5).align_y(Alignment::Center))
+                .padding([3, 7])
+                .on_press(Message::QuickToken(marker))
+                .style(style::quiet_button(p, false))
+                .into()
+        };
+        let options = Row::new()
+            .spacing(2)
+            .align_y(Alignment::Center)
+            .push(token(Icon::Calendar, "When", '!'))
+            .push(token(Icon::Tag, "Tags", '@'))
+            .push(token(Icon::Flag, "Deadline", '^'))
+            .push(token(Icon::Box, "Move", '#'));
+        let mut line = Row::with_children(chips).spacing(6).align_y(Alignment::Center);
+        line = line.push(space().width(Length::Fill)).push(options);
+        line.into()
     }
 }
 
