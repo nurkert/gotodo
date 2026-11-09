@@ -56,6 +56,10 @@ pub struct Task {
     pub reminder: Option<NaiveTime>,
     pub reminded_on: Option<NaiveDate>,
     pub deadline: Option<NaiveDate>,
+    #[serde(default)]
+    pub deadline_time: Option<NaiveTime>,
+    #[serde(default)]
+    pub deadline_alerted: bool,
     pub area: Option<Id>,
     pub project: Option<Id>,
     pub heading: Option<Id>,
@@ -86,6 +90,8 @@ impl Task {
             reminder: None,
             reminded_on: None,
             deadline: None,
+            deadline_time: None,
+            deadline_alerted: false,
             area: None,
             project: None,
             heading: None,
@@ -151,6 +157,8 @@ pub struct Settings {
     pub auto_lock_minutes: u32,
     pub reminder_shows_title: bool,
     pub quick_entry_to_today: bool,
+    /// Minutes before a timed deadline to send a notification; 0 turns it off.
+    pub deadline_alert_minutes: u32,
 }
 
 impl Default for Settings {
@@ -165,6 +173,7 @@ impl Default for Settings {
             auto_lock_minutes: 15,
             reminder_shows_title: false,
             quick_entry_to_today: false,
+            deadline_alert_minutes: 60,
         }
     }
 }
@@ -861,6 +870,28 @@ impl Library {
     }
 
     /// To-dos whose reminder should fire now; marks them so each fires once a day.
+    /// Timed deadlines that come within `lead_minutes`, as `(task, minutes left)`.
+    /// Each one fires once; changing the deadline re-arms it.
+    pub fn take_due_deadlines(&mut self, today: NaiveDate, now: NaiveTime, lead_minutes: u32) -> Vec<(Id, i64)> {
+        let mut out = Vec::new();
+        if lead_minutes == 0 {
+            return out;
+        }
+        let current = today.and_time(now);
+        for task in &mut self.tasks {
+            if !task.is_open() || task.trashed || task.deadline_alerted {
+                continue;
+            }
+            let (Some(date), Some(time)) = (task.deadline, task.deadline_time) else { continue };
+            let left = (date.and_time(time) - current).num_minutes();
+            if left <= i64::from(lead_minutes) {
+                task.deadline_alerted = true;
+                out.push((task.id, left));
+            }
+        }
+        out
+    }
+
     pub fn take_due_reminders(&mut self, today: NaiveDate, now: NaiveTime) -> Vec<Id> {
         let mut out = Vec::new();
         for task in &mut self.tasks {
@@ -925,6 +956,22 @@ mod tests {
         assert!(rows(&lib, View::Today, day(9)).is_empty());
         assert_eq!(rows(&lib, View::Today, day(10)), vec![id]);
         assert_eq!(rows(&lib, View::Today, day(12)), vec![id]);
+    }
+
+    #[test]
+    fn timed_deadline_fires_once_inside_the_lead_time() {
+        let mut lib = Library::default();
+        let id = lib.insert(Task::new(Kind::Todo, "Abgabe", Schedule::Anytime));
+        let at = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        {
+            let task = lib.task_mut(id).unwrap();
+            task.deadline = Some(day(8));
+            task.deadline_time = Some(at(17, 0));
+        }
+        assert!(lib.take_due_deadlines(day(8), at(15, 0), 60).is_empty());
+        assert!(lib.take_due_deadlines(day(8), at(16, 10), 0).is_empty());
+        assert_eq!(lib.take_due_deadlines(day(8), at(16, 10), 60), vec![(id, 50)]);
+        assert!(lib.take_due_deadlines(day(8), at(16, 30), 60).is_empty());
     }
 
     #[test]

@@ -39,6 +39,7 @@ pub enum Act {
     When(When),
     ClearReminder,
     Deadline(Option<NaiveDate>),
+    DeadlineAt(NaiveDate, chrono::NaiveTime),
     Move(MoveTarget),
     ToggleTag(Option<Id>, String),
     Go(View),
@@ -135,7 +136,7 @@ impl App {
     pub fn sheet_placeholder(&self) -> &'static str {
         match self.sheet {
             Some(Sheet::When) => t("Type a date: fri, 24.12., in 3 days, tomorrow 9:00"),
-            Some(Sheet::Deadline) => t("Type a date"),
+            Some(Sheet::Deadline) => t("Type a date, optionally with a time: fri 17:00"),
             Some(Sheet::Repeat) => t("every 2 weeks, after 3 days, until 2027-01-01"),
             Some(Sheet::Find) => t("Search everything"),
             Some(Sheet::Prompt(Prompt::NewProject)) => t("Project name"),
@@ -179,8 +180,16 @@ impl App {
             }
             Some(Sheet::Deadline) => {
                 let mut out = Vec::new();
-                if let Some(date) = parse::parse_deadline(query, today).filter(|_| !query.is_empty()) {
-                    out.push(item(Icon::Flag, red, date_label(date, today), Act::Deadline(Some(date))));
+                if let Some((date, time)) = parse::parse_deadline_at(query, today).filter(|_| !query.is_empty()) {
+                    out.push(match time {
+                        Some(time) => item(
+                            Icon::Flag,
+                            red,
+                            format!("{}  {}", date_label(date, today), time.format("%H:%M")),
+                            Act::DeadlineAt(date, time),
+                        ),
+                        None => item(Icon::Flag, red, date_label(date, today), Act::Deadline(Some(date))),
+                    });
                 }
                 let presets = vec![
                     item(Icon::Flag, red, t("Today"), Act::Deadline(Some(today))),

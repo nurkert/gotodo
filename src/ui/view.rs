@@ -249,16 +249,15 @@ impl App {
 
     fn workspace(&self) -> El<'_> {
         let p = self.palette();
-        let divider = mouse_area(
-            container(container(space()).width(1).height(Length::Fill).style(style::panel(p.line)))
-                .center_x(7)
-                .height(Length::Fill)
-                .style(style::panel(p.page)),
-        )
+        // The line sits flush against the sidebar; the strip beside it only widens the grab area.
+        let divider = mouse_area(row![
+            container(space()).width(1).height(Length::Fill).style(style::panel(p.line)),
+            container(space()).width(5).height(Length::Fill),
+        ])
         .on_press(Message::SidebarGrab)
         .interaction(mouse::Interaction::ResizingHorizontally);
         let split = row![
-            container(self.sidebar()).width(self.sidebar_width() - 3.0).height(Length::Fill).style(style::panel(p.sidebar)),
+            container(self.sidebar()).width(self.sidebar_width()).height(Length::Fill).style(style::panel(p.sidebar)),
             divider,
             self.main_pane(),
         ];
@@ -710,6 +709,10 @@ impl App {
             } else {
                 format!("{days}d {}", t("left"))
             };
+            let words = match task.deadline_time {
+                Some(time) => format!("{words} {}", time.format("%H:%M")),
+                None => words,
+            };
             line = line.push(row![icon(Icon::Flag, 12, tint), label(words, 12, tint)].spacing(4).align_y(Alignment::Center));
         }
         line.into()
@@ -1006,6 +1009,13 @@ impl App {
             segment(t("Manually"), s.log_interval == LogInterval::Manually, SettingChange::Log(LogInterval::Manually), p),
         ]
         .spacing(4);
+        let alert = row![
+            segment(t("Off"), s.deadline_alert_minutes == 0, SettingChange::DeadlineAlert(0), p),
+            segment("15 min", s.deadline_alert_minutes == 15, SettingChange::DeadlineAlert(15), p),
+            segment("1 h", s.deadline_alert_minutes == 60, SettingChange::DeadlineAlert(60), p),
+            segment("3 h", s.deadline_alert_minutes == 180, SettingChange::DeadlineAlert(180), p),
+        ]
+        .spacing(4);
         let lock = row![
             segment("5", s.auto_lock_minutes == 5, SettingChange::AutoLock(5), p),
             segment("15", s.auto_lock_minutes == 15, SettingChange::AutoLock(15), p),
@@ -1097,6 +1107,7 @@ impl App {
             setting_line("Log completed items", logging.into()),
             toggle("Group Today by project", s.group_today_by_parent, SettingChange::GroupToday),
             toggle("Quick Entry adds to Today", s.quick_entry_to_today, SettingChange::QuickToday),
+            setting_line("Notify before a timed deadline", alert.into()),
             toggle("Reduce motion", s.reduce_motion, SettingChange::ReduceMotion),
             space().height(6),
             security,
@@ -1233,7 +1244,7 @@ impl App {
                 .font(MEDIUM)
                 .style(style::fading_input(p, input_a));
             let meta: El<'_> = if meta_a < 0.03 {
-                space().height(24).into()
+                space().height(if self.quick_cal.is_some() { 38 } else { 24 }).into()
             } else {
                 reveal(self.quick_meta()).fade(1.0 - meta_a, p.raised).slide((1.0 - meta_a) * 4.0).into()
             };
@@ -1259,8 +1270,72 @@ impl App {
             .into()
     }
 
+    /// Twelve days in one row, for picking a date without leaving Quick Entry.
+    fn quick_strip(&self, marker: char, start: NaiveDate) -> El<'_> {
+        let p = self.palette();
+        let today = self.today();
+        let chosen = self.lib().and_then(|lib| {
+            let draft = parse::parse_draft(&self.quick_text, lib, today);
+            if marker == '^' {
+                draft.deadline
+            } else {
+                draft.when.and_then(|w| match w.schedule {
+                    Schedule::On(date) => Some(date),
+                    _ => None,
+                })
+            }
+        });
+        let nav = |which: Icon, weeks: i32| -> El<'static> {
+            button(icon(which, 14, p.muted))
+                .padding([8, 6])
+                .on_press(Message::QuickCalShift(weeks))
+                .style(style::quiet_button(p, false))
+                .into()
+        };
+        let mut line = Row::new().spacing(2).align_y(Alignment::Center);
+        line = line.push(
+            container(label(month_name(start.month()), 12, p.muted).font(MEDIUM).wrapping(text::Wrapping::None)).width(66),
+        );
+        line = line.push(nav(Icon::Left, -1));
+        for offset in 0..12u64 {
+            let date = start + chrono::Days::new(offset);
+            let is_today = date == today;
+            let is_chosen = chosen == Some(date);
+            let top = if date.day() == 1 {
+                month_name(date.month()).chars().take(3).collect::<String>()
+            } else {
+                weekday_name(date.weekday().num_days_from_monday() as usize).chars().take(2).collect::<String>()
+            };
+            let number_color = if is_chosen { p.on_accent } else if is_today { p.accent } else { p.text };
+            let top_color = if is_chosen { p.on_accent } else { p.faint };
+            line = line.push(
+                button(
+                    column![label(top, 9.5, top_color), label(date.day().to_string(), 13, number_color).font(if is_today { SEMIBOLD } else { FONT })]
+                        .spacing(1)
+                        .align_x(Alignment::Center),
+                )
+                .width(33)
+                .height(38)
+                .padding(0)
+                .on_press(Message::QuickCalPick(date))
+                .style(move |theme: &iced::Theme, status| {
+                    if is_chosen {
+                        style::primary_button(p)(theme, status)
+                    } else {
+                        style::quiet_button(p, false)(theme, status)
+                    }
+                }),
+            );
+        }
+        line = line.push(nav(Icon::Right, 1));
+        line.into()
+    }
+
     fn quick_meta(&self) -> El<'_> {
         let p = self.palette();
+        if let Some((marker, start)) = self.quick_cal {
+            return self.quick_strip(marker, start);
+        }
         let Some(lib) = self.lib() else { return space().into() };
         let completions = self.quick_completions();
         if !completions.is_empty() {
@@ -1306,20 +1381,20 @@ impl App {
         for (_, name) in draft.tags {
             add(Icon::Tag, name, p.teal);
         }
-        let token = |which: Icon, words: &'static str, marker: char| -> El<'static> {
+        let token = |which: Icon, words: &'static str, message: Message| -> El<'static> {
             button(row![icon(which, 13, p.muted), label(t(words), 12, p.muted)].spacing(5).align_y(Alignment::Center))
                 .padding([3, 7])
-                .on_press(Message::QuickToken(marker))
+                .on_press(message)
                 .style(style::quiet_button(p, false))
                 .into()
         };
         let options = Row::new()
             .spacing(2)
             .align_y(Alignment::Center)
-            .push(token(Icon::Calendar, "When", '!'))
-            .push(token(Icon::Tag, "Tags", '@'))
-            .push(token(Icon::Flag, "Deadline", '^'))
-            .push(token(Icon::Box, "Move", '#'));
+            .push(token(Icon::Calendar, "When", Message::QuickCal('!')))
+            .push(token(Icon::Tag, "Tags", Message::QuickToken('@')))
+            .push(token(Icon::Flag, "Deadline", Message::QuickCal('^')))
+            .push(token(Icon::Box, "Move", Message::QuickToken('#')));
         let mut line = Row::with_children(chips).spacing(6).align_y(Alignment::Center);
         line = line.push(space().width(Length::Fill)).push(options);
         line.into()

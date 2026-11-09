@@ -43,7 +43,7 @@ type Task2 = IcedTask<Message>;
 type Slot<T> = Arc<Mutex<Option<T>>>;
 
 /// The visible popup card.
-pub const QUICK_CARD: Size = Size::new(580.0, 102.0);
+pub const QUICK_CARD: Size = Size::new(580.0, 110.0);
 /// The window is exactly the card, so compositor effects (blur, border,
 /// shadow, rounded corners) wrap the popup and nothing else.
 const QUICK_SIZE: Size = QUICK_CARD;
@@ -127,6 +127,9 @@ pub enum Message {
     QuickToken(char),
     SidebarGrab,
     CalShift(i32),
+    QuickCal(char),
+    QuickCalShift(i32),
+    QuickCalPick(NaiveDate),
     CalPick(NaiveDate),
     Ignored,
 }
@@ -151,6 +154,7 @@ pub enum SettingChange {
     AutoLock(u32),
     ReminderTitles(bool),
     QuickToday(bool),
+    DeadlineAlert(u32),
 }
 
 pub enum Auth {
@@ -201,6 +205,8 @@ pub struct App {
     skip_auto_unlock: bool,
     pub slots: vault::Slots,
     pub cal_month: NaiveDate,
+    /// The open mini calendar in Quick Entry: the token it edits and its first day.
+    pub quick_cal: Option<(char, NaiveDate)>,
     pub setup_password: bool,
 
     pub view: View,
@@ -336,6 +342,7 @@ impl App {
             skip_auto_unlock: false,
             slots,
             cal_month: local_today().with_day(1).unwrap_or_else(local_today),
+            quick_cal: None,
             setup_password: false,
             view: View::Today,
             tag_filter: None,
@@ -399,6 +406,7 @@ impl App {
         let (id, open) = window::open(quick_settings());
         self.quick = Some(id);
         self.quick_text.clear();
+        self.quick_cal = None;
         self.quick_anim = Spring::quick(0.0);
         self.quick_anim.to(1.0);
         open.map(Message::Opened)
@@ -910,6 +918,18 @@ impl App {
                 self.edit_targets(move |lib, id, _| {
                     if let Some(task) = lib.task_mut(id) {
                         task.deadline = date;
+                        task.deadline_time = None;
+                        task.deadline_alerted = false;
+                    }
+                });
+                IcedTask::none()
+            }
+            Act::DeadlineAt(date, time) => {
+                self.edit_targets(move |lib, id, _| {
+                    if let Some(task) = lib.task_mut(id) {
+                        task.deadline = Some(date);
+                        task.deadline_time = Some(time);
+                        task.deadline_alerted = false;
                     }
                 });
                 IcedTask::none()
@@ -1290,7 +1310,13 @@ impl App {
 
     fn on_quick_key(&mut self, press: &KeyPress) -> Task2 {
         match press.key.as_ref() {
-            Key::Named(Named::Escape) => self.close_quick(),
+            Key::Named(Named::Escape) => {
+                // Esc first closes the mini calendar, then the popup.
+                if self.quick_cal.take().is_some() {
+                    return IcedTask::none();
+                }
+                self.close_quick()
+            }
             Key::Named(Named::Tab) => {
                 if matches!(self.auth, Auth::Open) { self.complete_quick(0) } else { operation::focus_next() }
             }
@@ -1332,6 +1358,7 @@ impl App {
             let fallback = if lib.settings.quick_entry_to_today { Schedule::On(today) } else { Schedule::Inbox };
             let mut task = Task::new(Kind::Todo, draft.title.clone(), fallback);
             task.deadline = draft.deadline;
+            task.deadline_time = draft.deadline_time;
             for (existing, name) in &draft.tags {
                 let tag = existing.unwrap_or_else(|| lib.ensure_tag(name));
                 task.tags.push(tag);
@@ -1454,6 +1481,33 @@ impl App {
             });
             session.save_if_due();
         }
+        let lead = self.lib().map_or(0, |l| l.settings.deadline_alert_minutes);
+        let mut closing = Vec::new();
+        if let Some(session) = &mut self.session {
+            session.edit_silent(|lib| {
+                closing = lib.take_due_deadlines(today, now, lead);
+                !closing.is_empty()
+            });
+        }
+        if !closing.is_empty() {
+            let show_titles = self.lib().is_some_and(|l| l.settings.reminder_shows_title);
+            let body = closing
+                .iter()
+                .filter_map(|(id, left)| self.lib().and_then(|l| l.task(*id)).map(|task| (task, *left)))
+                .map(|(task, left)| {
+                    let when = if left <= 0 {
+                        t("Due now").to_owned()
+                    } else if left < 90 {
+                        format!("{} {left} {}", t("Due in"), t("min"))
+                    } else {
+                        format!("{} {} {}", t("Due in"), (left + 30) / 60, t("h"))
+                    };
+                    if show_titles { format!("{}: {when}", task.title) } else { when }
+                })
+                .collect::<Vec<_>>();
+            tasks.push(blocking(move || notify(&body), |()| Message::Ignored));
+        }
+
         if !due.is_empty() {
             let show_titles = self.lib().is_some_and(|l| l.settings.reminder_shows_title);
             let body = due
@@ -1525,6 +1579,7 @@ impl App {
                 SettingChange::AutoLock(v) => s.auto_lock_minutes = v,
                 SettingChange::ReminderTitles(v) => s.reminder_shows_title = v,
                 SettingChange::QuickToday(v) => s.quick_entry_to_today = v,
+                SettingChange::DeadlineAlert(v) => s.deadline_alert_minutes = v,
             }
             true
         });
@@ -1570,6 +1625,7 @@ impl App {
             Message::Closed(id) => {
                 if Some(id) == self.quick {
                     self.quick = None;
+                    self.quick_cal = None;
                     self.quick_text.zeroize();
                 }
                 if Some(id) == self.main {
@@ -1601,6 +1657,32 @@ impl App {
             Message::Key(press) => return self.on_key(press),
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
             Message::SidebarGrab => self.sidebar_drag = true,
+            Message::QuickCal(marker) => {
+                self.quick_cal = match self.quick_cal {
+                    Some((open, _)) if open == marker => None,
+                    _ => Some((marker, self.today)),
+                };
+            }
+            Message::QuickCalShift(weeks) => {
+                if let Some((_, start)) = &mut self.quick_cal {
+                    let days = chrono::Duration::days(i64::from(weeks) * 7);
+                    *start = start.checked_add_signed(days).unwrap_or(*start);
+                }
+            }
+            Message::QuickCalPick(date) => {
+                if let Some((marker, _)) = self.quick_cal.take() {
+                    let kept: Vec<&str> = self.quick_text.split_whitespace().filter(|w| !w.starts_with(marker)).collect();
+                    let mut text = kept.join(" ");
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push(marker);
+                    text.push_str(&date.format("%Y-%m-%d").to_string());
+                    text.push(' ');
+                    self.quick_text = text;
+                }
+                return IcedTask::batch([operation::focus(quick_id()), operation::move_cursor_to_end(quick_id())]);
+            }
             Message::CalShift(delta) => {
                 let shifted = if delta >= 0 {
                     self.cal_month.checked_add_months(Months::new(delta as u32))

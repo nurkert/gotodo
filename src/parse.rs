@@ -177,6 +177,15 @@ pub fn parse_when(input: &str, today: NaiveDate) -> Option<When> {
     Some(when)
 }
 
+/// A deadline with an optional time of day, e.g. `fri 17:00`.
+pub fn parse_deadline_at(input: &str, today: NaiveDate) -> Option<(NaiveDate, Option<NaiveTime>)> {
+    let when = parse_when(input, today)?;
+    match when.schedule {
+        Schedule::On(date) => Some((date, when.reminder)),
+        _ => None,
+    }
+}
+
 pub fn parse_deadline(input: &str, today: NaiveDate) -> Option<NaiveDate> {
     match parse_when(input, today)?.schedule {
         Schedule::On(date) => Some(date),
@@ -284,6 +293,7 @@ pub struct Draft {
     pub tags: Vec<(Option<Id>, String)>,
     pub when: Option<When>,
     pub deadline: Option<NaiveDate>,
+    pub deadline_time: Option<NaiveTime>,
 }
 
 /// Splits raw quick-entry text into a title and metadata. Tokens that resolve
@@ -319,9 +329,10 @@ pub fn parse_draft(input: &str, lib: &Library, today: NaiveDate) -> Draft {
                 }
                 None => false,
             },
-            Some('^') if !rest.is_empty() => match parse_deadline(&spaced, today) {
-                Some(date) => {
+            Some('^') if !rest.is_empty() => match parse_deadline_at(&spaced, today) {
+                Some((date, time)) => {
                     draft.deadline = Some(date);
+                    draft.deadline_time = time;
                     true
                 }
                 None => false,
