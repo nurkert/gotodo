@@ -8,7 +8,7 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Length, Padding, Point, mouse, window};
 
 use super::keys::{self, Cmd};
-use super::motion::{CheckMark, check_mark, pie, reveal};
+use super::motion::{CheckMark, check_mark, hslide, pie, reveal};
 use super::sheet::{Sheet, date_label};
 use super::style::{self, FONT, Icon, MEDIUM, Palette, SEMIBOLD, icon};
 use super::{App, Auth, DropTarget, Message, SettingChange, auth_id, quick_id, sheet_id, title_id};
@@ -287,6 +287,10 @@ impl App {
             .align_y(Alignment::Center)
             .push(tint_icon)
             .push(label(text_label, 13.5, p.text).font(if active { MEDIUM } else { FONT }).wrapping(text::Wrapping::None).width(Length::Fill));
+        // The keyboard way to this list stays visible on the right.
+        if let Some(chord) = chord_for(Cmd::Go(view)) {
+            line = line.push(label(chord, 11, p.faint).wrapping(text::Wrapping::None));
+        }
         if let Some((value, alert)) = count.filter(|(v, _)| *v > 0) {
             line = line.push(if alert {
                 Element::from(
@@ -1244,7 +1248,7 @@ impl App {
                 .font(MEDIUM)
                 .style(style::fading_input(p, input_a));
             let meta: El<'_> = if meta_a < 0.03 {
-                space().height(if self.quick_cal.is_some() { 38 } else { 24 }).into()
+                space().height(if self.quick_cal.is_some() { 72 } else { 58 }).into()
             } else {
                 reveal(self.quick_meta()).fade(1.0 - meta_a, p.raised).slide((1.0 - meta_a) * 4.0).into()
             };
@@ -1258,14 +1262,14 @@ impl App {
                 .align_y(Alignment::Center),
                 meta,
             ]
-            .spacing(13)
+            .spacing(10)
             .into()
         };
 
         container(content)
-            .padding([17, 18])
+            .padding([0, 18])
             .width(Length::Fill)
-            .height(Length::Fill)
+            .center_y(Length::Fill)
             .style(style::quick_card(p, card_a))
             .into()
     }
@@ -1297,8 +1301,10 @@ impl App {
             container(label(month_name(start.month()), 12, p.muted).font(MEDIUM).wrapping(text::Wrapping::None)).width(66),
         );
         line = line.push(nav(Icon::Left, -1));
-        for offset in 0..12u64 {
-            let date = start + chrono::Days::new(offset);
+        // A week of spare days on each side lets the strip glide between pages.
+        let mut days = Row::new().spacing(2).align_y(Alignment::Center);
+        for offset in 0..26u64 {
+            let date = start + chrono::Days::new(offset) - chrono::Days::new(7);
             let is_today = date == today;
             let is_chosen = chosen == Some(date);
             let top = if date.day() == 1 {
@@ -1308,7 +1314,7 @@ impl App {
             };
             let number_color = if is_chosen { p.on_accent } else if is_today { p.accent } else { p.text };
             let top_color = if is_chosen { p.on_accent } else { p.faint };
-            line = line.push(
+            days = days.push(
                 button(
                     column![label(top, 9.5, top_color), label(date.day().to_string(), 13, number_color).font(if is_today { SEMIBOLD } else { FONT })]
                         .spacing(1)
@@ -1327,18 +1333,47 @@ impl App {
                 }),
             );
         }
+        let pitch = 33.0 + 2.0;
+        line = line.push(hslide(days, (7.0 + self.quick_cal_slide.value) * pitch));
         line = line.push(nav(Icon::Right, 1));
+        line.into()
+    }
+
+    /// The one-click schedule words that stay visible while typing.
+    fn quick_presets(&self) -> El<'_> {
+        let p = self.palette();
+        let marker = match self.quick_cal {
+            Some(('^', _)) => '^',
+            _ => '!',
+        };
+        let words: Vec<(&'static str, &'static str)> = if marker == '^' {
+            vec![("today", t("Today")), ("tomorrow", t("Tomorrow")), ("monday", weekday_name(0)), ("friday", weekday_name(4))]
+        } else {
+            vec![
+                ("today", t("Today")),
+                ("tomorrow", t("Tomorrow")),
+                ("evening", t("This Evening")),
+                ("someday", t("Someday")),
+                ("anytime", t("Anytime")),
+            ]
+        };
+        let mut line = Row::new().spacing(4).align_y(Alignment::Center);
+        for (word, title) in words {
+            line = line.push(
+                button(label(title, 12.5, p.text))
+                    .padding([3, 8])
+                    .on_press(Message::QuickPreset(marker, word))
+                    .style(style::quiet_button(p, false)),
+            );
+        }
         line.into()
     }
 
     fn quick_meta(&self) -> El<'_> {
         let p = self.palette();
-        if let Some((marker, start)) = self.quick_cal {
-            return self.quick_strip(marker, start);
-        }
         let Some(lib) = self.lib() else { return space().into() };
         let completions = self.quick_completions();
-        if !completions.is_empty() {
+        let upper: El<'_> = if !completions.is_empty() {
             let mut line = Row::new().spacing(6).align_y(Alignment::Center);
             for (index, (_, title)) in completions.into_iter().enumerate() {
                 line = line.push(
@@ -1348,9 +1383,20 @@ impl App {
                         .style(style::quiet_button(p, index == 0)),
                 );
             }
-            line = line.push(space().width(Length::Fill)).push(label(t("Tab completes"), 11.5, p.faint));
-            return line.into();
-        }
+            line.push(space().width(Length::Fill)).push(label(t("Tab completes"), 11.5, p.faint)).into()
+        } else {
+            self.quick_presets()
+        };
+        let lower: El<'_> = match self.quick_cal {
+            Some((marker, start)) => self.quick_strip(marker, start),
+            None => self.quick_details(lib),
+        };
+        column![upper, lower].spacing(10).into()
+    }
+
+    /// What the text already says, plus the buttons that add more.
+    fn quick_details(&self, lib: &Library) -> El<'_> {
+        let p = self.palette();
         let today = self.today();
         let draft = parse::parse_draft(&self.quick_text, lib, today);
         let mut chips: Vec<El<'_>> = Vec::new();
@@ -1376,25 +1422,34 @@ impl App {
             add(Icon::Calendar, words, p.gold);
         }
         if let Some(deadline) = draft.deadline {
-            add(Icon::Flag, date_label(deadline, today), p.red);
+            let words = match draft.deadline_time {
+                Some(time) => format!("{} {}", date_label(deadline, today), time.format("%H:%M")),
+                None => date_label(deadline, today),
+            };
+            add(Icon::Flag, words, p.red);
         }
         for (_, name) in draft.tags {
             add(Icon::Tag, name, p.teal);
         }
-        let token = |which: Icon, words: &'static str, message: Message| -> El<'static> {
-            button(row![icon(which, 13, p.muted), label(t(words), 12, p.muted)].spacing(5).align_y(Alignment::Center))
-                .padding([3, 7])
-                .on_press(message)
-                .style(style::quiet_button(p, false))
-                .into()
+        // The typed marker is part of each label, so the keyboard way is always visible.
+        let token = |which: Icon, words: &'static str, marker: char, message: Message| -> El<'static> {
+            button(
+                row![icon(which, 13, p.muted), label(t(words), 12, p.muted), label(marker.to_string(), 11, p.faint)]
+                    .spacing(5)
+                    .align_y(Alignment::Center),
+            )
+            .padding([3, 7])
+            .on_press(message)
+            .style(style::quiet_button(p, false))
+            .into()
         };
         let options = Row::new()
             .spacing(2)
             .align_y(Alignment::Center)
-            .push(token(Icon::Calendar, "When", Message::QuickCal('!')))
-            .push(token(Icon::Tag, "Tags", Message::QuickToken('@')))
-            .push(token(Icon::Flag, "Deadline", Message::QuickCal('^')))
-            .push(token(Icon::Box, "Move", Message::QuickToken('#')));
+            .push(token(Icon::Calendar, "When", '!', Message::QuickCal('!')))
+            .push(token(Icon::Tag, "Tags", '@', Message::QuickToken('@')))
+            .push(token(Icon::Flag, "Deadline", '^', Message::QuickCal('^')))
+            .push(token(Icon::Box, "Move", '#', Message::QuickToken('#')));
         let mut line = Row::with_children(chips).spacing(6).align_y(Alignment::Center);
         line = line.push(space().width(Length::Fill)).push(options);
         line.into()
@@ -1422,12 +1477,34 @@ fn segment(name: &'static str, active: bool, change: SettingChange, p: Palette) 
         .into()
 }
 
+fn chord_for(cmd: Cmd) -> Option<String> {
+    keys::BINDINGS.iter().find(|b| b.cmd == cmd).map(keys::chord_label)
+}
+
+fn tip_text(cmd: Cmd) -> String {
+    keys::BINDINGS
+        .iter()
+        .find(|b| b.cmd == cmd)
+        .map_or_else(String::new, |b| format!("{}   {}", t(b.label), keys::chord_label(b)))
+}
+
+fn tipped(control: El<'static>, words: String, p: Palette) -> El<'static> {
+    if words.is_empty() {
+        return control;
+    }
+    tooltip(control, container(label(words, 12, p.text)).padding([5, 9]), tooltip::Position::Top)
+        .style(style::tip(p))
+        .gap(6)
+        .into()
+}
+
 fn detail_chip(which: Icon, words: String, cmd: Cmd, p: Palette) -> El<'static> {
-    button(row![icon(which, 13, p.muted), label(words, 12, p.muted)].spacing(5).align_y(Alignment::Center))
+    let chip = button(row![icon(which, 13, p.muted), label(words, 12, p.muted)].spacing(5).align_y(Alignment::Center))
         .padding([3, 7])
         .on_press(Message::Command(cmd))
         .style(style::quiet_button(p, false))
-        .into()
+        .into();
+    tipped(chip, tip_text(cmd), p)
 }
 
 fn upcoming_header<'a>(date: NaiveDate, today: NaiveDate, p: Palette) -> El<'a> {

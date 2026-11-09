@@ -31,11 +31,17 @@ impl Spring {
 
     /// A snappier spring for small surfaces such as the Quick Entry popup.
     pub fn quick(value: f32) -> Self {
-        Self { stiffness: 1100.0, damping: 62.0, ..Self::at(value) }
+        Self { stiffness: 2200.0, damping: 92.0, ..Self::at(value) }
     }
 
     pub fn to(&mut self, target: f32) {
         self.target = target;
+    }
+
+    /// Moves the current value without touching the target, so a press can
+    /// start an animation from where the content visually was.
+    pub fn nudge(&mut self, delta: f32) {
+        self.value += delta;
     }
 
     pub fn snap(&mut self) {
@@ -257,6 +263,140 @@ impl<Message> Widget<Message, Theme, Renderer> for Reveal<'_, Message> {
 impl<'a, Message: 'a> From<Reveal<'a, Message>> for Element<'a, Message> {
     fn from(reveal: Reveal<'a, Message>) -> Self {
         Element::new(reveal)
+    }
+}
+
+/// Lays its content out at natural width and shows a window onto it, shifted
+/// left by `offset` pixels. Everything outside the window is clipped.
+pub struct HSlide<'a, Message> {
+    content: Element<'a, Message>,
+    offset: f32,
+}
+
+pub fn hslide<'a, Message>(content: impl Into<Element<'a, Message>>, offset: f32) -> HSlide<'a, Message> {
+    HSlide { content: content.into(), offset }
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for HSlide<'_, Message> {
+    fn tag(&self) -> widget::tree::Tag {
+        self.content.as_widget().tag()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        self.content.as_widget().state()
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        self.content.as_widget().children()
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        self.content.as_widget().diff(tree);
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Shrink)
+    }
+
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
+        let inner = layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, limits.max().height));
+        let child = self
+            .content
+            .as_widget_mut()
+            .layout(tree, renderer, &inner)
+            .move_to(Point::new(-self.offset, 0.0));
+        let size = Size::new(limits.max().width, child.size().height);
+        layout::Node::with_children(size, vec![child])
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content.as_widget_mut().operate(
+            tree,
+            layout.children().next().expect("slide has one child"),
+            renderer,
+            operation,
+        );
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let cursor = if cursor.is_over(layout.bounds()) { cursor } else { mouse::Cursor::Unavailable };
+        self.content.as_widget_mut().update(
+            tree,
+            event,
+            layout.children().next().expect("slide has one child"),
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if !cursor.is_over(layout.bounds()) {
+            return mouse::Interaction::default();
+        }
+        self.content.as_widget().mouse_interaction(
+            tree,
+            layout.children().next().expect("slide has one child"),
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+        let cursor = if cursor.is_over(bounds) { cursor } else { mouse::Cursor::Unavailable };
+        renderer.with_layer(bounds, |renderer| {
+            self.content.as_widget().draw(
+                tree,
+                renderer,
+                theme,
+                style,
+                layout.children().next().expect("slide has one child"),
+                cursor,
+                &bounds,
+            );
+        });
+    }
+}
+
+impl<'a, Message: 'a> From<HSlide<'a, Message>> for Element<'a, Message> {
+    fn from(slide: HSlide<'a, Message>) -> Self {
+        Element::new(slide)
     }
 }
 

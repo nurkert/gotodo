@@ -43,7 +43,7 @@ type Task2 = IcedTask<Message>;
 type Slot<T> = Arc<Mutex<Option<T>>>;
 
 /// The visible popup card.
-pub const QUICK_CARD: Size = Size::new(580.0, 110.0);
+pub const QUICK_CARD: Size = Size::new(580.0, 128.0);
 /// The window is exactly the card, so compositor effects (blur, border,
 /// shadow, rounded corners) wrap the popup and nothing else.
 const QUICK_SIZE: Size = QUICK_CARD;
@@ -130,6 +130,7 @@ pub enum Message {
     QuickCal(char),
     QuickCalShift(i32),
     QuickCalPick(NaiveDate),
+    QuickPreset(char, &'static str),
     CalPick(NaiveDate),
     Ignored,
 }
@@ -207,6 +208,8 @@ pub struct App {
     pub cal_month: NaiveDate,
     /// The open mini calendar in Quick Entry: the token it edits and its first day.
     pub quick_cal: Option<(char, NaiveDate)>,
+    /// Days the strip still has to slide to reach its new first day.
+    pub quick_cal_slide: Spring,
     pub setup_password: bool,
 
     pub view: View,
@@ -343,6 +346,7 @@ impl App {
             slots,
             cal_month: local_today().with_day(1).unwrap_or_else(local_today),
             quick_cal: None,
+            quick_cal_slide: Spring::at(0.0),
             setup_password: false,
             view: View::Today,
             tag_filter: None,
@@ -477,6 +481,7 @@ impl App {
         !self.view_anim.settled()
             || !self.sheet_anim.settled()
             || !self.quick_anim.settled()
+            || !self.quick_cal_slide.settled()
             || !self.ghosts.is_empty()
             || self.rows.values().any(|a| !a.settled())
     }
@@ -1328,6 +1333,19 @@ impl App {
         self.lib().map_or_else(Vec::new, |lib| parse::completions(&self.quick_text, lib))
     }
 
+    /// Replaces any `marker` token in the Quick Entry text with `marker` + `value`.
+    fn set_quick_token(&mut self, marker: char, value: &str) {
+        let kept: Vec<&str> = self.quick_text.split_whitespace().filter(|w| !w.starts_with(marker)).collect();
+        let mut text = kept.join(" ");
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push(marker);
+        text.push_str(value);
+        text.push(' ');
+        self.quick_text = text;
+    }
+
     fn complete_quick(&mut self, index: usize) -> Task2 {
         if let Some((replacement, _)) = self.quick_completions().get(index) {
             self.quick_text = parse::apply_completion(&self.quick_text, replacement);
@@ -1536,6 +1554,7 @@ impl App {
         self.view_anim.step(dt, reduce);
         self.sheet_anim.step(dt, reduce);
         self.quick_anim.step(dt, reduce);
+        self.quick_cal_slide.step(dt, reduce);
         if self.sheet_anim.settled() && self.sheet_anim.target < 0.5 {
             self.sheet = None;
         }
@@ -1662,25 +1681,25 @@ impl App {
                     Some((open, _)) if open == marker => None,
                     _ => Some((marker, self.today)),
                 };
+                self.quick_cal_slide = Spring::at(0.0);
             }
             Message::QuickCalShift(weeks) => {
                 if let Some((_, start)) = &mut self.quick_cal {
                     let days = chrono::Duration::days(i64::from(weeks) * 7);
                     *start = start.checked_add_signed(days).unwrap_or(*start);
+                    // The old days stay on screen first, then glide out of the way.
+                    self.quick_cal_slide.nudge(-7.0 * weeks as f32);
+                    self.quick_cal_slide.to(0.0);
                 }
             }
             Message::QuickCalPick(date) => {
                 if let Some((marker, _)) = self.quick_cal.take() {
-                    let kept: Vec<&str> = self.quick_text.split_whitespace().filter(|w| !w.starts_with(marker)).collect();
-                    let mut text = kept.join(" ");
-                    if !text.is_empty() {
-                        text.push(' ');
-                    }
-                    text.push(marker);
-                    text.push_str(&date.format("%Y-%m-%d").to_string());
-                    text.push(' ');
-                    self.quick_text = text;
+                    self.set_quick_token(marker, &date.format("%Y-%m-%d").to_string());
                 }
+                return IcedTask::batch([operation::focus(quick_id()), operation::move_cursor_to_end(quick_id())]);
+            }
+            Message::QuickPreset(marker, word) => {
+                self.set_quick_token(marker, word);
                 return IcedTask::batch([operation::focus(quick_id()), operation::move_cursor_to_end(quick_id())]);
             }
             Message::CalShift(delta) => {
