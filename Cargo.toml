@@ -1,6 +1,6 @@
 [package]
 name = "gotodo"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 description = "A calm, encrypted, keyboard-first to-do manager for Linux"
 repository = "https://github.com/nurkert/gotodo"
