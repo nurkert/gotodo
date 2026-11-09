@@ -44,6 +44,9 @@ pub enum Cmd {
     DeleteList,
     ConnectKeePass,
     DisconnectKeePass,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     Go(View),
 }
 
@@ -108,6 +111,12 @@ pub const BINDINGS: &[Binding] = &[
     ctrl('p', Cmd::Palette, "Commands"),
     ctrl(',', Cmd::Settings, "Settings"),
     ctrl('l', Cmd::Lock, "Lock"),
+    ctrl('+', Cmd::ZoomIn, "Zoom in"),
+    ctrl_shift('+', Cmd::ZoomIn, "Zoom in"),
+    ctrl('=', Cmd::ZoomIn, "Zoom in"),
+    ctrl('-', Cmd::ZoomOut, "Zoom out"),
+    ctrl_shift('_', Cmd::ZoomOut, "Zoom out"),
+    ctrl('0', Cmd::ZoomReset, "Reset zoom"),
     plain_named(Named::F1, Cmd::Help, "Shortcuts"),
     ctrl('1', Cmd::Go(View::Inbox), "Inbox"),
     ctrl('2', Cmd::Go(View::Today), "Today"),

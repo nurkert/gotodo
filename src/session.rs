@@ -95,6 +95,13 @@ impl Session {
         Ok(Self::start(lib, vault, false))
     }
 
+    /// A new vault that opens with the sealed device secret, no password.
+    pub fn create_device(secret: &[u8]) -> Result<Self, VaultError> {
+        let lib = Library::default();
+        let vault = Vault::create_device(&vault_path(), secret, &serialize(&lib))?;
+        Ok(Self::start(lib, vault, false))
+    }
+
     pub fn open(secret: &Secret) -> Result<Self, VaultError> {
         let (vault, plain) = Vault::open(&vault_path(), secret)?;
         let lib = serde_json::from_slice(&plain).map_err(|_| VaultError::Corrupt)?;

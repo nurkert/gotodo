@@ -51,7 +51,7 @@ pub fn status() -> Status {
     let Ok(service) = SecretService::connect(EncryptionType::Dh) else {
         return Status::Missing;
     };
-    match service.get_default_collection().and_then(|c| c.is_locked()) {
+    match service.get_any_collection().and_then(|c| c.is_locked()) {
         Ok(false) => Status::Unlocked,
         _ => Status::Locked,
     }
@@ -73,7 +73,7 @@ pub fn store_secret(vault_id: &str, secret: &[u8]) -> Result<(), String> {
         return Err("KeePassXC is not unlocked".into());
     }
     let service = SecretService::connect(EncryptionType::Dh).map_err(|e| e.to_string())?;
-    let collection = service.get_default_collection().map_err(|e| e.to_string())?;
+    let collection = service.get_any_collection().map_err(|e| e.to_string())?;
     collection
         .create_item(LABEL, attributes(vault_id), secret, true, "application/octet-stream")
         .map(|_| ())

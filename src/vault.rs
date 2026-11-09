@@ -40,6 +40,8 @@ pub enum VaultError {
     WrongSecret,
     Corrupt,
     NoKeePassSlot,
+    NoDeviceSlot,
+    LastSlot,
     AlreadyOpen,
     WeakPassword,
     Io(std::io::Error),
@@ -51,6 +53,8 @@ impl std::fmt::Display for VaultError {
             Self::WrongSecret => write!(f, "wrong password or key"),
             Self::Corrupt => write!(f, "the vault file is damaged or was tampered with"),
             Self::NoKeePassSlot => write!(f, "KeePassXC unlock is not set up for this vault"),
+            Self::NoDeviceSlot => write!(f, "device unlock is not set up for this vault"),
+            Self::LastSlot => write!(f, "this is the only way to open the vault; set a password first"),
             Self::AlreadyOpen => write!(f, "the vault is already open in another process"),
             Self::WeakPassword => {
                 write!(f, "the password needs at least {MIN_PASSWORD_CHARS} characters")
@@ -89,6 +93,8 @@ impl KdfParams {
 enum SlotKind {
     Password { salt: String, kdf: KdfParams },
     Keepass,
+    /// A random secret sealed to this machine (TPM or device key).
+    Device,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +114,7 @@ struct Header {
 pub enum Secret {
     Password(Zeroizing<String>),
     KeePass(Zeroizing<Vec<u8>>),
+    Device(Zeroizing<Vec<u8>>),
 }
 
 type Key = Zeroizing<[u8; KEY_LEN]>;
@@ -156,6 +163,10 @@ pub fn new_keepass_secret() -> Zeroizing<Vec<u8>> {
     Zeroizing::new(random::<KEEPASS_SECRET_LEN>().to_vec())
 }
 
+pub fn new_device_secret() -> Zeroizing<Vec<u8>> {
+    Zeroizing::new(random::<KEEPASS_SECRET_LEN>().to_vec())
+}
+
 fn decode(s: &str) -> Result<Vec<u8>, VaultError> {
     B64.decode(s).map_err(|_| VaultError::Corrupt)
 }
@@ -173,12 +184,20 @@ fn derive_password(password: &str, salt: &[u8], kdf: KdfParams) -> Result<Key, V
     Ok(out)
 }
 
-fn derive_keepass(secret: &[u8], vault_id: &str) -> Result<Key, VaultError> {
+fn derive_with(secret: &[u8], vault_id: &str, info: &[u8]) -> Result<Key, VaultError> {
     let mut out = Zeroizing::new([0u8; KEY_LEN]);
     Hkdf::<Sha256>::new(Some(vault_id.as_bytes()), secret)
-        .expand(b"gotodo keepass slot v1", out.as_mut())
+        .expand(info, out.as_mut())
         .map_err(|_| VaultError::Corrupt)?;
     Ok(out)
+}
+
+fn derive_keepass(secret: &[u8], vault_id: &str) -> Result<Key, VaultError> {
+    derive_with(secret, vault_id, b"gotodo keepass slot v1")
+}
+
+fn derive_device(secret: &[u8], vault_id: &str) -> Result<Key, VaultError> {
+    derive_with(secret, vault_id, b"gotodo device slot v1")
 }
 
 fn slot_aad(vault_id: &str, kind: &SlotKind) -> Vec<u8> {
@@ -227,6 +246,11 @@ fn password_slot(password: &str, vault_id: &str, kdf: KdfParams, key: &Key) -> R
 fn keepass_slot(secret: &[u8], vault_id: &str, key: &Key) -> Result<Slot, VaultError> {
     let kek = derive_keepass(secret, vault_id)?;
     Ok(wrap(&kek, vault_id, SlotKind::Keepass, key))
+}
+
+fn device_slot(secret: &[u8], vault_id: &str, key: &Key) -> Result<Slot, VaultError> {
+    let kek = derive_device(secret, vault_id)?;
+    Ok(wrap(&kek, vault_id, SlotKind::Device, key))
 }
 
 fn encode_header(header: &Header) -> Vec<u8> {
@@ -311,6 +335,28 @@ pub fn peek(path: &Path) -> Result<(String, bool), VaultError> {
     Ok((header.vault_id, has_keepass))
 }
 
+/// Which unlock methods a vault offers, without unlocking it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Slots {
+    pub password: bool,
+    pub keepass: bool,
+    pub device: bool,
+}
+
+pub fn peek_slots(path: &Path) -> Result<Slots, VaultError> {
+    let raw = fs::read(path)?;
+    let (header, _, _) = split(&raw)?;
+    let mut slots = Slots::default();
+    for slot in &header.slots {
+        match slot.kind {
+            SlotKind::Password { .. } => slots.password = true,
+            SlotKind::Keepass => slots.keepass = true,
+            SlotKind::Device => slots.device = true,
+        }
+    }
+    Ok(slots)
+}
+
 fn split(raw: &[u8]) -> Result<(Header, &[u8], &[u8]), VaultError> {
     let rest = raw.strip_prefix(MAGIC.as_slice()).ok_or(VaultError::Corrupt)?;
     let (len, rest) = rest.split_first_chunk::<4>().ok_or(VaultError::Corrupt)?;
@@ -354,6 +400,20 @@ impl Vault {
         Ok(vault)
     }
 
+    /// A new vault that opens with a device-sealed secret and no password.
+    pub fn create_device(path: &Path, secret: &[u8], plain: &[u8]) -> Result<Self, VaultError> {
+        ensure_private_dir(path)?;
+        let lock = acquire_lock(path)?;
+        let vault_id = uuid::Uuid::new_v4().to_string();
+        let key = new_key();
+        let slot = device_slot(secret, &vault_id, &key)?;
+        let header = Header { vault_id, slots: vec![slot] };
+        let header_bytes = encode_header(&header);
+        let vault = Self { path: path.to_owned(), header, header_bytes, key, kdf: DEFAULT_KDF, _lock: lock };
+        vault.save(plain)?;
+        Ok(vault)
+    }
+
     pub fn open(path: &Path, secret: &Secret) -> Result<(Self, Zeroizing<Vec<u8>>), VaultError> {
         ensure_private_dir(path)?;
         let lock = acquire_lock(path)?;
@@ -366,7 +426,7 @@ impl Vault {
                     .iter()
                     .find_map(|s| match &s.kind {
                         SlotKind::Password { salt, kdf } => Some((s, salt, *kdf)),
-                        SlotKind::Keepass => None,
+                        SlotKind::Keepass | SlotKind::Device => None,
                     })
                     .ok_or(VaultError::Corrupt)?;
                 let kek = derive_password(password, &decode(salt)?, kdf)?;
@@ -384,7 +444,24 @@ impl Vault {
                     .iter()
                     .find_map(|s| match s.kind {
                         SlotKind::Password { kdf, .. } => Some(kdf),
-                        SlotKind::Keepass => None,
+                        SlotKind::Keepass | SlotKind::Device => None,
+                    })
+                    .unwrap_or(DEFAULT_KDF);
+                (unwrap(&kek, &header.vault_id, slot)?, kdf)
+            }
+            Secret::Device(value) => {
+                let slot = header
+                    .slots
+                    .iter()
+                    .find(|s| s.kind == SlotKind::Device)
+                    .ok_or(VaultError::NoDeviceSlot)?;
+                let kek = derive_device(value, &header.vault_id)?;
+                let kdf = header
+                    .slots
+                    .iter()
+                    .find_map(|s| match s.kind {
+                        SlotKind::Password { kdf, .. } => Some(kdf),
+                        SlotKind::Keepass | SlotKind::Device => None,
                     })
                     .unwrap_or(DEFAULT_KDF);
                 (unwrap(&kek, &header.vault_id, slot)?, kdf)
@@ -407,6 +484,47 @@ impl Vault {
 
     pub fn vault_id(&self) -> &str {
         &self.header.vault_id
+    }
+
+    pub fn has_device(&self) -> bool {
+        self.header.slots.iter().any(|s| s.kind == SlotKind::Device)
+    }
+
+    pub fn has_password(&self) -> bool {
+        self.header.slots.iter().any(|s| matches!(s.kind, SlotKind::Password { .. }))
+    }
+
+    pub fn add_device(&mut self, secret: &[u8], plain: &[u8]) -> Result<(), VaultError> {
+        let slot = device_slot(secret, &self.header.vault_id, &self.key)?;
+        let mut header = self.header.clone();
+        header.slots.retain(|s| s.kind != SlotKind::Device);
+        header.slots.push(slot);
+        self.replace_header(header);
+        self.save(plain)
+    }
+
+    /// Refuses to remove the last way in.
+    pub fn remove_device(&mut self, plain: &[u8]) -> Result<(), VaultError> {
+        let mut header = self.header.clone();
+        header.slots.retain(|s| s.kind != SlotKind::Device);
+        if header.slots.is_empty() {
+            return Err(VaultError::LastSlot);
+        }
+        self.replace_header(header);
+        self.save(plain)
+    }
+
+    /// Adds (or replaces) the password slot, e.g. as a recovery option.
+    pub fn add_password(&mut self, password: &str, plain: &[u8]) -> Result<(), VaultError> {
+        if password.chars().count() < MIN_PASSWORD_CHARS {
+            return Err(VaultError::WeakPassword);
+        }
+        let slot = password_slot(password, &self.header.vault_id, self.kdf, &self.key)?;
+        let mut header = self.header.clone();
+        header.slots.retain(|s| !matches!(s.kind, SlotKind::Password { .. }));
+        header.slots.push(slot);
+        self.replace_header(header);
+        self.save(plain)
     }
 
     pub fn has_keepass(&self) -> bool {
@@ -446,6 +564,9 @@ impl Vault {
     pub fn remove_keepass(&mut self, plain: &[u8]) -> Result<(), VaultError> {
         let mut header = self.header.clone();
         header.slots.retain(|s| s.kind != SlotKind::Keepass);
+        if header.slots.is_empty() {
+            return Err(VaultError::LastSlot);
+        }
         self.replace_header(header);
         self.save(plain)
     }
@@ -458,6 +579,7 @@ impl Vault {
         current: &str,
         new: &str,
         keepass: Option<&[u8]>,
+        device: Option<&[u8]>,
         plain: &[u8],
     ) -> Result<(), VaultError> {
         if new.chars().count() < MIN_PASSWORD_CHARS {
@@ -469,7 +591,7 @@ impl Vault {
             .iter()
             .find_map(|s| match &s.kind {
                 SlotKind::Password { salt, kdf } => Some((s, salt, *kdf)),
-                SlotKind::Keepass => None,
+                SlotKind::Keepass | SlotKind::Device => None,
             })
             .ok_or(VaultError::Corrupt)?;
         let kek = derive_password(current, &decode(salt)?, kdf)?;
@@ -480,6 +602,9 @@ impl Vault {
         let mut slots = vec![password_slot(new, &vault_id, self.kdf, &key)?];
         if let Some(secret) = keepass {
             slots.push(keepass_slot(secret, &vault_id, &key)?);
+        }
+        if let Some(secret) = device {
+            slots.push(device_slot(secret, &vault_id, &key)?);
         }
         let mut old = std::mem::replace(&mut self.key, key);
         unlock_memory(&old);
@@ -607,16 +732,39 @@ mod tests {
         let secret = new_keepass_secret();
         vault.add_keepass(&secret, b"x").unwrap();
         assert!(matches!(
-            vault.change_password("wrong wrong wrong", "another long password", None, b"x"),
+            vault.change_password("wrong wrong wrong", "another long password", None, None, b"x"),
             Err(VaultError::WrongSecret)
         ));
         let old_key = **vault.key;
-        vault.change_password(PASSWORD, "another long password", Some(&secret), b"new").unwrap();
+        vault.change_password(PASSWORD, "another long password", Some(&secret), None, b"new").unwrap();
         assert_ne!(old_key, **vault.key);
         drop(vault);
         assert!(reopen(&path, &password(PASSWORD)).is_err());
         assert_eq!(reopen(&path, &password("another long password")).unwrap(), b"new");
         assert_eq!(reopen(&path, &Secret::KeePass(secret)).unwrap(), b"new");
+    }
+
+    #[test]
+    fn device_vault_opens_without_a_password_and_can_gain_one() {
+        let (_d, path) = setup();
+        let secret = new_device_secret();
+        let mut vault = Vault::create_device(&path, &secret, b"x").unwrap();
+        assert!(vault.has_device() && !vault.has_password());
+        assert!(matches!(vault.remove_device(b"x"), Err(VaultError::LastSlot)));
+        vault.add_password(PASSWORD, b"y").unwrap();
+        vault.remove_device(b"y").unwrap();
+        drop(vault);
+        assert!(matches!(reopen(&path, &Secret::Device(secret)), Err(VaultError::NoDeviceSlot)));
+        assert_eq!(reopen(&path, &password(PASSWORD)).unwrap(), b"y");
+    }
+
+    #[test]
+    fn device_secret_unlocks_and_wrong_one_is_refused() {
+        let (_d, path) = setup();
+        let secret = new_device_secret();
+        drop(Vault::create_device(&path, &secret, b"x").unwrap());
+        assert_eq!(reopen(&path, &Secret::Device(secret)).unwrap(), b"x");
+        assert!(matches!(reopen(&path, &Secret::Device(new_device_secret())), Err(VaultError::WrongSecret)));
     }
 
     #[test]

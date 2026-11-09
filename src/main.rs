@@ -1,3 +1,4 @@
+mod device;
 mod i18n;
 mod ipc;
 mod keepass;

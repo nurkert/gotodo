@@ -20,7 +20,6 @@ use crate::vault::MIN_PASSWORD_CHARS;
 
 type El<'a> = Element<'a, Message>;
 
-const SIDEBAR: f32 = 246.0;
 const CONTENT_MAX: f32 = 720.0;
 /// Left edge shared by the page title, section headers and the check boxes.
 const ROW_INSET: f32 = 12.0;
@@ -124,17 +123,71 @@ impl App {
         .on_press_maybe((!self.auth_busy && (enough || !setup)).then_some(Message::AuthSubmit))
         .style(style::primary_button(p));
 
+        let device_button = |primary: bool| -> El<'static> {
+            let words = if self.auth_busy { t("Working…") } else { t("Unlock") };
+            button(center(text(words).size(14).font(MEDIUM)))
+                .height(38)
+                .width(Length::Fill)
+                .on_press_maybe((!self.auth_busy).then_some(Message::AuthDevice))
+                .style(move |theme: &iced::Theme, status| {
+                    if primary {
+                        style::primary_button(p)(theme, status)
+                    } else {
+                        style::quiet_button(p, false)(theme, status)
+                    }
+                })
+                .into()
+        };
+
         if compact {
-            let error = self.auth_error.as_deref().unwrap_or(heading);
+            let error = self.auth_error.as_deref().unwrap_or(if self.slots.password { heading } else { t("gotodo is locked") });
             let color = if self.auth_error.is_some() { p.red } else { p.muted };
+            if !self.slots.password && !setup {
+                return column![device_button(true), label(error, 12, color)].spacing(8).into();
+            }
             return column![password, label(error, 12, color)].spacing(8).into();
         }
 
+        if setup && !self.setup_password {
+            let mut card = Column::new()
+                .spacing(14)
+                .width(360)
+                .push(icon(Icon::Lock, 26, p.accent))
+                .push(label(t("Welcome to gotodo"), 22, p.text).font(SEMIBOLD))
+                .push(
+                    label(
+                        t("Your to-dos stay on this computer, encrypted. The key is sealed to this machine, so there is no password to type."),
+                        13,
+                        p.muted,
+                    )
+                    .line_height(1.45),
+                )
+                .push(
+                    button(center(text(if self.auth_busy { t("Working…") } else { t("Get started") }).size(14).font(MEDIUM)))
+                        .height(38)
+                        .width(Length::Fill)
+                        .on_press_maybe((!self.auth_busy).then_some(Message::SetupDevice))
+                        .style(style::primary_button(p)),
+                )
+                .push(
+                    button(center(text(t("Use a password instead")).size(13).color(p.muted)))
+                        .height(34)
+                        .width(Length::Fill)
+                        .on_press(Message::SetupPassword(true))
+                        .style(style::quiet_button(p, false)),
+                );
+            if let Some(error) = &self.auth_error {
+                card = card.push(label(error.as_str(), 13, p.red));
+            }
+            return card.into();
+        }
+
+        let device_only = !setup && !self.slots.password;
         let mut card = Column::new()
             .spacing(14)
             .width(360)
             .push(icon(Icon::Lock, 26, p.accent))
-            .push(label(heading, 22, p.text).font(SEMIBOLD));
+            .push(label(if device_only { t("gotodo is locked") } else { heading }, 22, p.text).font(SEMIBOLD));
         if setup {
             card = card.push(
                 label(
@@ -145,7 +198,11 @@ impl App {
                 .line_height(1.45),
             );
         }
-        card = card.push(password);
+        if device_only {
+            card = card.push(device_button(true));
+        } else {
+            card = card.push(password);
+        }
         if setup {
             card = card.push(
                 text_input(t("Repeat password"), &self.repeat)
@@ -157,7 +214,20 @@ impl App {
                     .style(style::boxed_input(p)),
             );
         }
-        card = card.push(action);
+        if !device_only {
+            card = card.push(action);
+        }
+        if setup {
+            card = card.push(
+                button(center(text(t("Use the device key instead")).size(13).color(p.muted)))
+                    .height(34)
+                    .width(Length::Fill)
+                    .on_press(Message::SetupPassword(false))
+                    .style(style::quiet_button(p, false)),
+            );
+        } else if self.slots.device && self.slots.password {
+            card = card.push(device_button(false));
+        }
         if let Auth::Locked { has_keepass: true } = self.auth {
             let ready = self.keepass == keepass::Status::Unlocked;
             card = card.push(
@@ -177,8 +247,17 @@ impl App {
 
     fn workspace(&self) -> El<'_> {
         let p = self.palette();
+        let divider = mouse_area(
+            container(container(space()).width(1).height(Length::Fill).style(style::panel(p.line)))
+                .center_x(7)
+                .height(Length::Fill)
+                .style(style::panel(p.page)),
+        )
+        .on_press(Message::SidebarGrab)
+        .interaction(mouse::Interaction::ResizingHorizontally);
         let split = row![
-            container(self.sidebar()).width(SIDEBAR).height(Length::Fill).style(style::panel(p.sidebar)),
+            container(self.sidebar()).width(self.sidebar_width() - 3.0).height(Length::Fill).style(style::panel(p.sidebar)),
+            divider,
             self.main_pane(),
         ];
         let mut layers = stack![split];
@@ -881,21 +960,52 @@ impl App {
         .align_y(Alignment::Center)
         .into();
 
-        let change_ready = !self.password_old.is_empty() && self.password_new.chars().count() >= MIN_PASSWORD_CHARS;
+        let device_on = self.slots.device;
+        let device_line: El<'_> = row![
+            icon(Icon::Lock, 16, if device_on { p.green } else { p.muted }),
+            column![
+                label(t("Unlock with this device"), 13, p.text),
+                label(
+                    if device_on { t("On. The key is sealed to this computer.") } else { t("Off. A password or KeePassXC opens gotodo.") },
+                    12,
+                    p.muted,
+                ),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            button(text(if device_on { t("Turn off") } else { t("Turn on") }).size(13))
+                .padding([6, 12])
+                .on_press(if device_on { Message::DeviceDisable } else { Message::DeviceEnable })
+                .style(style::quiet_button(p, false)),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .into();
+
+        let has_password = self.slots.password;
+        let change_ready = (!has_password || !self.password_old.is_empty()) && self.password_new.chars().count() >= MIN_PASSWORD_CHARS;
         let mut security = Column::new()
             .spacing(9)
             .push(heading_label(t("Security"), p))
             .push(setting_line("Auto-lock after", lock.into()))
             .push(toggle("Show titles in reminders", s.reminder_shows_title, SettingChange::ReminderTitles))
+            .push(device_line)
             .push(keepass_line);
-        security = security.push(
-            row![
+        let mut password_row = Row::new().spacing(6);
+        if has_password {
+            password_row = password_row.push(
                 text_input(t("Current password"), &self.password_old).secure(true).on_input(Message::PasswordOld).padding(7).size(13).style(style::boxed_input(p)),
-                text_input(t("New password"), &self.password_new).secure(true).on_input(Message::PasswordNew).padding(7).size(13).style(style::boxed_input(p)),
-                button(text(t("Change password")).size(13).color(p.on_accent)).padding([7, 12]).on_press_maybe(change_ready.then_some(Message::PasswordChange)).style(style::primary_button(p)),
-            ]
-            .spacing(6),
-        );
+            );
+        }
+        password_row = password_row
+            .push(text_input(if has_password { t("New password") } else { t("Recovery password") }, &self.password_new).secure(true).on_input(Message::PasswordNew).padding(7).size(13).style(style::boxed_input(p)))
+            .push(
+                button(text(if has_password { t("Change password") } else { t("Set password") }).size(13).color(p.on_accent))
+                    .padding([7, 12])
+                    .on_press_maybe(change_ready.then_some(Message::PasswordChange))
+                    .style(style::primary_button(p)),
+            );
+        security = security.push(password_row);
         if let Some(note) = &self.security_note {
             security = security.push(label(note.as_str(), 12, p.muted));
         }
@@ -904,7 +1014,7 @@ impl App {
             label(t("Settings"), 19, p.text).font(SEMIBOLD),
             heading_label(t("General"), p),
             setting_line("Appearance", appearance.into()),
-            setting_line("Text size", slider(0.85..=1.4, s.text_scale, |v| Message::Setting(SettingChange::Scale(v))).step(0.05_f32).width(200).into()),
+            setting_line("Text size", slider(0.7..=2.0, s.text_scale, |v| Message::Setting(SettingChange::Scale(v))).step(0.05_f32).width(200).into()),
             setting_line("Log completed items", logging.into()),
             toggle("Group Today by project", s.group_today_by_parent, SettingChange::GroupToday),
             toggle("Quick Entry adds to Today", s.quick_entry_to_today, SettingChange::QuickToday),
@@ -971,7 +1081,7 @@ impl App {
         let hint = if connected {
             t("Done. Next time, gotodo opens by itself while KeePassXC is unlocked.")
         } else if status == keepass::Status::OtherProvider {
-            t("Another secret service is running, not KeePassXC")
+            t("GNOME Keyring holds the Secret Service. Quit it (killall gnome-keyring-daemon), then turn Secret Service Integration off and on again in KeePassXC.")
         } else if unlocked {
             t("Everything is ready. One click connects it.")
         } else {

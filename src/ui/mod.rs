@@ -19,6 +19,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::i18n::t;
 use crate::ipc;
+use crate::device;
 use crate::keepass;
 use crate::model::{
     ChecklistItem, Id, Kind, Library, MoveTarget, Schedule, Section, Status, Task, View, local_today,
@@ -44,6 +45,8 @@ type Slot<T> = Arc<Mutex<Option<T>>>;
 const QUICK_SIZE: Size = Size::new(580.0, 102.0);
 /// The popup opens at this height and grows to QUICK_SIZE.
 const QUICK_MIN_HEIGHT: f32 = 44.0;
+pub const SIDEBAR_MIN: f32 = 180.0;
+pub const SIDEBAR_MAX: f32 = 420.0;
 const LOG_DELAY: Duration = Duration::from_millis(1100);
 
 #[derive(Clone)]
@@ -63,6 +66,11 @@ pub enum Message {
     AuthRepeat(String),
     AuthSubmit,
     AuthKeePass,
+    AuthDevice,
+    SetupDevice,
+    SetupPassword(bool),
+    DeviceEnable,
+    DeviceDisable,
     AuthDone(Slot<Result<Session, String>>),
     KeePassProbe(keepass::Status, bool),
 
@@ -108,6 +116,7 @@ pub enum Message {
     QuickSubmit,
     QuickComplete(usize),
     QuickToken(char),
+    SidebarGrab,
     Ignored,
 }
 
@@ -179,6 +188,8 @@ pub struct App {
     pub auth_busy: bool,
     pub keepass: keepass::Status,
     skip_auto_unlock: bool,
+    pub slots: vault::Slots,
+    pub setup_password: bool,
 
     pub view: View,
     pub tag_filter: Option<Id>,
@@ -200,6 +211,8 @@ pub struct App {
     pub sheet_anim: Spring,
     pub quick_anim: Spring,
     quick_closing: bool,
+    sidebar_drag: bool,
+    sidebar_live: Option<f32>,
     pub query: String,
     pub sheet_index: usize,
 
@@ -295,11 +308,8 @@ fn quick_settings() -> window::Settings {
 impl App {
     pub fn boot(start_quick: bool) -> (Self, Task2) {
         let path = session::vault_path();
-        let auth = if vault::exists(&path) {
-            Auth::Locked { has_keepass: vault::peek(&path).map(|(_, k)| k).unwrap_or(false) }
-        } else {
-            Auth::Setup
-        };
+        let slots = if vault::exists(&path) { vault::peek_slots(&path).unwrap_or_default() } else { vault::Slots::default() };
+        let auth = if vault::exists(&path) { Auth::Locked { has_keepass: slots.keepass } } else { Auth::Setup };
         let mut app = Self {
             main: None,
             quick: None,
@@ -312,6 +322,8 @@ impl App {
             auth_busy: false,
             keepass: keepass::Status::Missing,
             skip_auto_unlock: false,
+            slots,
+            setup_password: false,
             view: View::Today,
             tag_filter: None,
             sections: Vec::new(),
@@ -331,6 +343,8 @@ impl App {
             sheet_anim: Spring::at(0.0),
             quick_anim: Spring::quick(1.0),
             quick_closing: false,
+            sidebar_drag: false,
+            sidebar_live: None,
             query: String::new(),
             sheet_index: 0,
             drag: None,
@@ -351,7 +365,13 @@ impl App {
         let needs_setup = matches!(app.auth, Auth::Setup);
         let open = if start_quick && !needs_setup { app.open_quick() } else { app.open_main() };
         let theme = iced::system::theme().map(|mode| Message::SystemDark(mode == iced::theme::Mode::Dark));
-        (app, IcedTask::batch([open, theme, Self::probe(true)]))
+        let device = if matches!(app.auth, Auth::Locked { .. }) && app.slots.device {
+            app.unlock_with_device()
+        } else {
+            IcedTask::none()
+        };
+        let probe = if app.slots.keepass { Self::probe(true) } else { IcedTask::none() };
+        (app, IcedTask::batch([open, theme, probe, device]))
     }
 
     fn open_main(&mut self) -> Task2 {
@@ -407,6 +427,18 @@ impl App {
         self.lib().is_some_and(|l| l.settings.reduce_motion)
     }
 
+    /// Sidebar width in logical pixels, live while the divider is being dragged.
+    pub fn sidebar_width(&self) -> f32 {
+        let saved = self.lib().map_or(246.0, |l| l.settings.sidebar_width);
+        self.sidebar_live.unwrap_or(saved).clamp(SIDEBAR_MIN, SIDEBAR_MAX)
+    }
+
+    fn zoom(&mut self, to: Option<f32>, step: f32) {
+        let current = self.lib().map_or(1.0, |l| l.settings.text_scale);
+        let next = to.unwrap_or(((current + step) * 20.0).round() / 20.0);
+        self.change_setting(SettingChange::Scale(next));
+    }
+
     pub fn today(&self) -> NaiveDate {
         self.today
     }
@@ -441,7 +473,7 @@ impl App {
         if self.animating() {
             subs.push(window::frames().map(Message::Frame));
         }
-        if self.pressed.is_some() {
+        if self.pressed.is_some() || self.sidebar_drag {
             subs.push(event::listen_with(cursor_event));
         }
         Subscription::batch(subs)
@@ -665,11 +697,8 @@ impl App {
     }
 
     fn lock(&mut self) {
-        let has_keepass = self
-            .session
-            .as_ref()
-            .map(|s| s.vault.lock().expect("vault lock").has_keepass())
-            .unwrap_or(false);
+        self.refresh_slots();
+        let has_keepass = self.slots.keepass;
         if let Some(session) = self.session.take() {
             session.close();
         }
@@ -695,6 +724,7 @@ impl App {
 
     fn finish_unlock(&mut self, session: Session) -> Task2 {
         self.session = Some(session);
+        self.refresh_slots();
         self.auth = Auth::Open;
         self.auth_busy = false;
         self.auth_error = None;
@@ -731,6 +761,52 @@ impl App {
                 Session::open(&secret).map_err(|e| match e {
                     VaultError::WrongSecret => t("Wrong password").to_owned(),
                     other => other.to_string(),
+                })
+            },
+            |result| Message::AuthDone(slot(result)),
+        )
+    }
+
+    /// Re-reads which unlock methods the open vault offers.
+    fn refresh_slots(&mut self) {
+        if let Some(session) = &self.session {
+            let vault = session.vault.lock().expect("vault lock");
+            self.slots = vault::Slots {
+                password: vault.has_password(),
+                keepass: vault.has_keepass(),
+                device: vault.has_device(),
+            };
+        }
+    }
+
+    fn unlock_with_device(&mut self) -> Task2 {
+        if self.auth_busy {
+            return IcedTask::none();
+        }
+        self.auth_busy = true;
+        self.auth_error = None;
+        blocking(
+            || {
+                let secret = device::unseal().ok_or_else(|| t("This computer could not open the device key").to_owned())?;
+                Session::open(&Secret::Device(secret)).map_err(|e| e.to_string())
+            },
+            |result| Message::AuthDone(slot(result)),
+        )
+    }
+
+    fn create_device_vault(&mut self) -> Task2 {
+        if self.auth_busy {
+            return IcedTask::none();
+        }
+        self.auth_busy = true;
+        self.auth_error = None;
+        blocking(
+            || {
+                let secret = vault::new_device_secret();
+                device::seal(&secret)?;
+                Session::create_device(&secret).map_err(|e| {
+                    device::remove();
+                    e.to_string()
                 })
             },
             |result| Message::AuthDone(slot(result)),
@@ -1086,6 +1162,9 @@ impl App {
                 }
                 return self.go(View::Inbox);
             }
+            Cmd::ZoomIn => self.zoom(None, 0.1),
+            Cmd::ZoomOut => self.zoom(None, -0.1),
+            Cmd::ZoomReset => self.zoom(Some(1.0), 0.0),
             Cmd::ConnectKeePass => return self.open_sheet(Sheet::KeePass),
             Cmd::DisconnectKeePass => return self.update(Message::KeePassDisconnect),
             Cmd::Go(view) => return self.go(view),
@@ -1323,7 +1402,8 @@ impl App {
 
     fn on_tick(&mut self) -> Task2 {
         if self.session.is_none() {
-            if self.last_probe.elapsed() >= Duration::from_secs(3) {
+            // Only talk to the Secret Service when KeePassXC unlock is actually set up.
+            if self.slots.keepass && self.last_probe.elapsed() >= Duration::from_secs(3) {
                 self.last_probe = Instant::now();
                 return Self::probe(false);
             }
@@ -1440,7 +1520,7 @@ impl App {
             let s = &mut lib.settings;
             match change {
                 SettingChange::Appearance(v) => s.appearance = v,
-                SettingChange::Scale(v) => s.text_scale = v.clamp(0.85, 1.4),
+                SettingChange::Scale(v) => s.text_scale = v.clamp(0.7, 2.0),
                 SettingChange::Log(v) => s.log_interval = v,
                 SettingChange::GroupToday(v) => s.group_today_by_parent = v,
                 SettingChange::ReduceMotion(v) => s.reduce_motion = v,
@@ -1523,7 +1603,11 @@ impl App {
             Message::Tick => return self.on_tick(),
             Message::Key(press) => return self.on_key(press),
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
+            Message::SidebarGrab => self.sidebar_drag = true,
             Message::CursorMoved(point) => {
+                if self.sidebar_drag {
+                    self.sidebar_live = Some(point.x.clamp(SIDEBAR_MIN, SIDEBAR_MAX));
+                }
                 if let Some((_, start)) = &mut self.pressed {
                     let origin = *start.get_or_insert(point);
                     self.cursor = point;
@@ -1536,6 +1620,14 @@ impl App {
             }
             Message::ButtonReleased => {
                 self.last_activity = Instant::now();
+                if std::mem::take(&mut self.sidebar_drag) {
+                    if let (Some(width), Some(session)) = (self.sidebar_live.take(), &mut self.session) {
+                        session.edit_silent(|lib| {
+                            lib.settings.sidebar_width = width;
+                            true
+                        });
+                    }
+                }
                 self.pressed = None;
                 let target = self.drop_target.take();
                 if let (Some(ids), Some(target)) = (self.drag.take(), target) {
@@ -1549,23 +1641,39 @@ impl App {
             Message::AuthSubmit => {
                 return match self.auth {
                     Auth::Setup => self.create_vault(),
+                    Auth::Locked { .. } if !self.slots.password => self.unlock_with_device(),
                     Auth::Locked { .. } => self.unlock_with_password(),
                     Auth::Open => IcedTask::none(),
                 };
             }
             Message::AuthKeePass => return self.unlock_with_keepass(),
+            Message::AuthDevice => return self.unlock_with_device(),
+            Message::SetupDevice => return self.create_device_vault(),
+            Message::SetupPassword(on) => {
+                self.setup_password = on;
+                self.auth_error = None;
+            }
+            Message::DeviceEnable => {
+                return self.security_task(|vault, plain| {
+                    let mut vault = vault.lock().expect("vault lock");
+                    let secret = vault::new_device_secret();
+                    device::seal(&secret)?;
+                    vault.add_device(&secret, &plain).map_err(|e| e.to_string())?;
+                    Ok(t("Device unlock is on").to_owned())
+                });
+            }
+            Message::DeviceDisable => {
+                return self.security_task(|vault, plain| {
+                    let mut vault = vault.lock().expect("vault lock");
+                    vault.remove_device(&plain).map_err(|e| e.to_string())?;
+                    device::remove();
+                    Ok(t("Device unlock is off").to_owned())
+                });
+            }
             Message::AuthDone(result) => {
                 self.auth_busy = false;
                 match result.lock().expect("result slot").take() {
-                    Some(Ok(session)) => {
-                        // A brand-new vault starts with a short, plain KeePassXC explanation.
-                        let first_run = matches!(self.auth, Auth::Setup);
-                        let unlocked = self.finish_unlock(session);
-                        if first_run {
-                            return IcedTask::batch([unlocked, self.open_sheet(Sheet::KeePass)]);
-                        }
-                        return unlocked;
-                    }
+                    Some(Ok(session)) => return self.finish_unlock(session),
                     Some(Err(error)) => {
                         self.auth_error = Some(error);
                         return operation::focus(auth_id());
@@ -1770,13 +1878,25 @@ impl App {
                 return self.security_task(move |vault, plain| {
                     let mut vault = vault.lock().expect("vault lock");
                     let secret = if vault.has_keepass() { keepass::read_secret(vault.vault_id()) } else { None };
+                    if !vault.has_password() {
+                        vault.add_password(&new, &plain).map_err(|e| e.to_string())?;
+                        return Ok(t("Password set").to_owned());
+                    }
+                    let device = if vault.has_device() { device::unseal() } else { None };
                     vault
-                        .change_password(&old, &new, secret.as_ref().map(|s| s.as_slice()), &plain)
+                        .change_password(
+                            &old,
+                            &new,
+                            secret.as_ref().map(|s| s.as_slice()),
+                            device.as_ref().map(|s| s.as_slice()),
+                            &plain,
+                        )
                         .map_err(|e| e.to_string())?;
                     Ok(t("Password changed").to_owned())
                 });
             }
             Message::SecurityDone(result) => {
+                self.refresh_slots();
                 self.security_note = result
                     .lock()
                     .expect("result slot")

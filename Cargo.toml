@@ -1,8 +1,9 @@
 [package]
 name = "gotodo"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 description = "A calm, encrypted, keyboard-first to-do manager for Linux"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/nurkert/gotodo"
 
 [dependencies]
