@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{Local, NaiveDate, Utc};
+use chrono::{Datelike, Local, Months, NaiveDate, Utc};
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::{Id as WidgetId, operation, text_editor};
 use iced::{Event, Point, Size, Subscription, Task as IcedTask, Theme, event, mouse, time, window};
@@ -126,6 +126,8 @@ pub enum Message {
     QuickComplete(usize),
     QuickToken(char),
     SidebarGrab,
+    CalShift(i32),
+    CalPick(NaiveDate),
     Ignored,
 }
 
@@ -198,6 +200,7 @@ pub struct App {
     pub keepass: keepass::Status,
     skip_auto_unlock: bool,
     pub slots: vault::Slots,
+    pub cal_month: NaiveDate,
     pub setup_password: bool,
 
     pub view: View,
@@ -219,7 +222,6 @@ pub struct App {
     pub sheet: Option<Sheet>,
     pub sheet_anim: Spring,
     pub quick_anim: Spring,
-    quick_closing: bool,
     sidebar_drag: bool,
     sidebar_live: Option<f32>,
     pub query: String,
@@ -333,6 +335,7 @@ impl App {
             keepass: keepass::Status::Missing,
             skip_auto_unlock: false,
             slots,
+            cal_month: local_today().with_day(1).unwrap_or_else(local_today),
             setup_password: false,
             view: View::Today,
             tag_filter: None,
@@ -352,7 +355,6 @@ impl App {
             sheet: None,
             sheet_anim: Spring::at(0.0),
             quick_anim: Spring::quick(1.0),
-            quick_closing: false,
             sidebar_drag: false,
             sidebar_live: None,
             query: String::new(),
@@ -397,7 +399,6 @@ impl App {
         let (id, open) = window::open(quick_settings());
         self.quick = Some(id);
         self.quick_text.clear();
-        self.quick_closing = false;
         self.quick_anim = Spring::quick(0.0);
         self.quick_anim.to(1.0);
         open.map(Message::Opened)
@@ -689,6 +690,9 @@ impl App {
         self.query.clear();
         self.sheet_index = 0;
         self.security_note = None;
+        if matches!(sheet, Sheet::When | Sheet::Deadline) {
+            self.cal_month = self.today.with_day(1).unwrap_or(self.today);
+        }
         let focus = operation::focus(sheet_id());
         if matches!(sheet, Sheet::KeePass | Sheet::Settings) {
             return IcedTask::batch([focus, Self::probe(false)]);
@@ -1306,16 +1310,12 @@ impl App {
     }
 
     fn close_quick(&mut self) -> Task2 {
-        let Some(id) = self.quick else { return IcedTask::none() };
-        if self.reduce_motion() {
-            return window::close(id);
+        // Dismiss in one cut: the compositor keeps blur and border for as long as
+        // the window exists, so fading the contents would leave an empty box behind.
+        match self.quick {
+            Some(id) => window::close(id),
+            None => IcedTask::none(),
         }
-        // Ease out first; on_frame closes the window once the spring settles.
-        if !self.quick_closing {
-            self.quick_closing = true;
-            self.quick_anim.to(0.0);
-        }
-        IcedTask::none()
     }
 
     fn submit_quick(&mut self) -> Task2 {
@@ -1509,12 +1509,6 @@ impl App {
         if !self.animating() {
             self.last_frame = None;
         }
-        if self.quick_closing && self.quick_anim.settled() {
-            self.quick_closing = false;
-            if let Some(id) = self.quick {
-                return window::close(id);
-            }
-        }
         IcedTask::none()
     }
 
@@ -1576,7 +1570,6 @@ impl App {
             Message::Closed(id) => {
                 if Some(id) == self.quick {
                     self.quick = None;
-                    self.quick_closing = false;
                     self.quick_text.zeroize();
                 }
                 if Some(id) == self.main {
@@ -1608,6 +1601,26 @@ impl App {
             Message::Key(press) => return self.on_key(press),
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
             Message::SidebarGrab => self.sidebar_drag = true,
+            Message::CalShift(delta) => {
+                let shifted = if delta >= 0 {
+                    self.cal_month.checked_add_months(Months::new(delta as u32))
+                } else {
+                    self.cal_month.checked_sub_months(Months::new(delta.unsigned_abs()))
+                };
+                self.cal_month = shifted.unwrap_or(self.cal_month);
+            }
+            Message::CalPick(date) => {
+                let act = match self.sheet {
+                    Some(Sheet::Deadline) => Act::Deadline(Some(date)),
+                    Some(Sheet::When) => Act::When(parse::When {
+                        schedule: Schedule::On(date),
+                        evening: false,
+                        reminder: None,
+                    }),
+                    _ => return IcedTask::none(),
+                };
+                return self.apply_act(act);
+            }
             Message::CursorMoved(point) => {
                 if self.sidebar_drag {
                     self.sidebar_live = Some(point.x.clamp(SIDEBAR_MIN, SIDEBAR_MAX));

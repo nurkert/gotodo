@@ -1,6 +1,6 @@
 //! Everything the user sees.
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Days, NaiveDate};
 use iced::widget::{
     Column, Row, button, center, column, container, hover, mouse_area, opaque, pin, row, scrollable, slider, space, stack,
     text, text_editor, text_input, toggler, tooltip,
@@ -23,6 +23,8 @@ type El<'a> = Element<'a, Message>;
 const CONTENT_MAX: f32 = 720.0;
 /// Left edge shared by the page title, section headers and the check boxes.
 const ROW_INSET: f32 = 12.0;
+/// Width of one day cell in the date picker.
+const CELL: f32 = 34.0;
 /// Room around each check box for the completion ring.
 const CHECK_PAD: f32 = 4.0;
 
@@ -868,13 +870,90 @@ impl App {
                 );
             }
         }
-        let mut sheet = Column::new().width(480).push(input);
+        let with_calendar = matches!(self.sheet, Some(Sheet::Deadline | Sheet::When));
+        let mut sheet = Column::new().width(if with_calendar { 760 } else { 480 }).push(input);
         if !is_prompt {
+            let results = scrollable(list).height(Length::Shrink).style(hidden_scrollbar(p));
+            let body: El<'_> = if with_calendar {
+                row![
+                    container(results).width(Length::Fill),
+                    container(space()).width(1).height(Length::Fill).style(style::panel(p.line)),
+                    self.calendar(),
+                ]
+                .into()
+            } else {
+                results.into()
+            };
             sheet = sheet
                 .push(container(space()).height(1).width(Length::Fill).style(style::panel(p.line)))
-                .push(scrollable(list).height(Length::Shrink).style(hidden_scrollbar(p)));
+                .push(body);
         }
         container(sheet).max_height(420).style(style::card(p)).into()
+    }
+
+    /// A month grid for picking a date with the mouse. Weeks start on Monday.
+    fn calendar(&self) -> El<'_> {
+        let p = self.palette();
+        let today = self.today();
+        let month = self.cal_month;
+        let nav = |which: Icon, delta: i32| -> El<'static> {
+            button(icon(which, 15, p.muted))
+                .padding(6)
+                .on_press(Message::CalShift(delta))
+                .style(style::quiet_button(p, false))
+                .into()
+        };
+        let head = row![
+            label(format!("{} {}", month_name(month.month()), month.year()), 14, p.text).font(SEMIBOLD).width(Length::Fill),
+            nav(Icon::Left, -1),
+            nav(Icon::Right, 1),
+        ]
+        .align_y(Alignment::Center);
+
+        let mut names = Row::new();
+        for index in 0..7 {
+            let short: String = weekday_name(index).chars().take(2).collect();
+            names = names.push(container(label(short, 11, p.faint).font(MEDIUM)).width(CELL).center_x(CELL));
+        }
+
+        let offset = u64::from(month.weekday().num_days_from_monday());
+        let start = month - Days::new(offset);
+        let mut grid = Column::new().spacing(2);
+        for week in 0..6u64 {
+            let mut line = Row::new().spacing(2);
+            for weekday in 0..7u64 {
+                let date = start + Days::new(week * 7 + weekday);
+                let inside = date.month() == month.month();
+                let is_today = date == today;
+                let color = if is_today {
+                    p.on_accent
+                } else if inside {
+                    p.text
+                } else {
+                    p.faint
+                };
+                line = line.push(
+                    button(center(label(date.day().to_string(), 12.5, color).font(if is_today { SEMIBOLD } else { FONT })))
+                        .width(CELL)
+                        .height(30)
+                        .padding(0)
+                        .on_press(Message::CalPick(date))
+                        .style(move |theme: &iced::Theme, status| {
+                            if is_today {
+                                let mut base = style::primary_button(p)(theme, status);
+                                base.border.radius = 15.0.into();
+                                base
+                            } else {
+                                let mut base = style::quiet_button(p, false)(theme, status);
+                                base.border.radius = 15.0.into();
+                                base
+                            }
+                        }),
+                );
+            }
+            grid = grid.push(line);
+        }
+        container(column![head, names, grid].spacing(8)).padding(14).width(CELL * 7.0 + 12.0 + 28.0).into()
     }
 
     fn help_sheet(&self) -> El<'_> {
