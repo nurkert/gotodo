@@ -17,7 +17,8 @@ gotodo: a calm, encrypted to-do manager
 
 USAGE:
     gotodo          open the app
-    gotodo quick    open the Quick Entry popup (bind this to a key)
+    gotodo quick    open the Quick Entry popup; run it again to dismiss it
+                    (bind this to a key)
     gotodo --help   show this text
     gotodo --version
 

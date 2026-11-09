@@ -31,6 +31,7 @@ pub enum Sheet {
     Prompt(Prompt),
     Settings,
     Help,
+    KeePass,
 }
 
 #[derive(Clone)]
@@ -75,6 +76,14 @@ fn accent(p: &Palette) -> iced::Color {
 
 fn teal(p: &Palette) -> iced::Color {
     p.teal
+}
+
+fn violet(p: &Palette) -> iced::Color {
+    p.violet
+}
+
+fn green(p: &Palette) -> iced::Color {
+    p.green
 }
 
 fn sand(p: &Palette) -> iced::Color {
@@ -294,13 +303,13 @@ impl App {
         let mut items = vec![
             item(Icon::Inbox, accent, t("Inbox"), Act::Go(View::Inbox)),
             item(Icon::Star, gold, t("Today"), Act::Go(View::Today)),
-            item(Icon::Calendar, red, t("Upcoming"), Act::Go(View::Upcoming)),
+            item(Icon::Calendar, violet, t("Upcoming"), Act::Go(View::Upcoming)),
             item(Icon::Layers, teal, t("Anytime"), Act::Go(View::Anytime)),
             item(Icon::Archive, sand, t("Someday"), Act::Go(View::Someday)),
-            item(Icon::Book, teal, t("Logbook"), Act::Go(View::Logbook)),
+            item(Icon::Book, green, t("Logbook"), Act::Go(View::Logbook)),
             item(Icon::Trash, muted, t("Trash"), Act::Go(View::Trash)),
             item(Icon::Flag, red, t("Deadlines"), Act::Go(View::Deadlines)),
-            item(Icon::Repeat, accent, t("Repeating"), Act::Go(View::Repeating)),
+            item(Icon::Repeat, violet, t("Repeating"), Act::Go(View::Repeating)),
             item(Icon::Box, accent, t("All Projects"), Act::Go(View::AllProjects)),
         ];
         items.extend(lib.all_open_projects().into_iter().map(|p| item(Icon::Box, accent, p.title.clone(), Act::Go(View::Project(p.id)))));

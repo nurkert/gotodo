@@ -28,6 +28,7 @@ pub struct Palette {
     pub gold: Color,
     pub red: Color,
     pub teal: Color,
+    pub violet: Color,
     pub green: Color,
     pub sand: Color,
     pub backdrop: Color,
@@ -36,7 +37,7 @@ pub struct Palette {
 pub const LIGHT: Palette = Palette {
     dark: false,
     page: color!(0xffffff),
-    sidebar: color!(0xf4f4f2),
+    sidebar: color!(0xf5f4f1),
     raised: color!(0xffffff),
     text: color!(0x25272b),
     muted: color!(0x74787f),
@@ -48,7 +49,8 @@ pub const LIGHT: Palette = Palette {
     on_accent: color!(0xffffff),
     gold: color!(0xf2b92c),
     red: color!(0xe2445c),
-    teal: color!(0x38a89d),
+    teal: color!(0x2fa394),
+    violet: color!(0x7b5cdc),
     green: color!(0x4bae6e),
     sand: color!(0xb99a5b),
     backdrop: Color::from_rgba(0.1, 0.11, 0.14, 0.22),
@@ -56,20 +58,21 @@ pub const LIGHT: Palette = Palette {
 
 pub const DARK: Palette = Palette {
     dark: true,
-    page: color!(0x1f2125),
-    sidebar: color!(0x27292e),
-    raised: color!(0x2c2f35),
+    page: color!(0x1b1d21),
+    sidebar: color!(0x23252a),
+    raised: color!(0x2a2d33),
     text: color!(0xe9eaec),
     muted: color!(0x9a9ea6),
     faint: color!(0x62666e),
-    line: color!(0x34373d),
+    line: color!(0x33363c),
     hover: Color::from_rgba(1.0, 1.0, 1.0, 0.06),
-    selected: color!(0x24446e),
+    selected: color!(0x23406a),
     accent: color!(0x4c91f7),
     on_accent: color!(0xffffff),
     gold: color!(0xf4c54a),
     red: color!(0xf0607a),
     teal: color!(0x4fc0b4),
+    violet: color!(0xa08cf7),
     green: color!(0x62c285),
     sand: color!(0xc9ab70),
     backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.42),
@@ -86,11 +89,11 @@ pub fn panel(background: Color) -> impl Fn(&Theme) -> container::Style {
 pub fn card(p: Palette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(p.raised.into()),
-        border: Border { radius: 10.0.into(), width: 1.0, color: p.line },
+        border: Border { radius: 14.0.into(), width: 1.0, color: p.line },
         shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.45 } else { 0.13 }),
-            offset: Vector::new(0.0, 6.0),
-            blur_radius: 22.0,
+            color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.5 } else { 0.14 }),
+            offset: Vector::new(0.0, 10.0),
+            blur_radius: 30.0,
         },
         ..container::Style::default()
     }
@@ -100,7 +103,7 @@ pub fn card(p: Palette) -> impl Fn(&Theme) -> container::Style {
 pub fn open_row(p: Palette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(p.raised.into()),
-        border: Border { radius: 10.0.into(), width: 1.0, color: p.line },
+        border: Border { radius: 12.0.into(), width: 1.0, color: p.line },
         shadow: Shadow {
             color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.4 } else { 0.1 }),
             offset: Vector::new(0.0, 2.0),
@@ -110,10 +113,24 @@ pub fn open_row(p: Palette) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+/// Small hover label for icon-only buttons.
+pub fn tip(p: Palette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(p.raised.into()),
+        border: Border { radius: 8.0.into(), width: 1.0, color: p.line },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.45 } else { 0.12 }),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 12.0,
+        },
+        ..container::Style::default()
+    }
+}
+
 pub fn solid_chip(tint: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(tint.into()),
-        border: rounded(7.0),
+        border: rounded(8.0),
         ..container::Style::default()
     }
 }
@@ -121,7 +138,7 @@ pub fn solid_chip(tint: Color) -> impl Fn(&Theme) -> container::Style {
 pub fn row_bg(background: Option<Color>) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background.map(Background::Color),
-        border: rounded(6.0),
+        border: rounded(9.0),
         ..container::Style::default()
     }
 }
@@ -130,7 +147,7 @@ pub fn chip(p: Palette, tint: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         text_color: Some(tint),
         background: Some(Color { a: if p.dark { 0.2 } else { 0.13 }, ..tint }.into()),
-        border: rounded(5.0),
+        border: rounded(6.0),
         ..container::Style::default()
     }
 }
@@ -151,7 +168,7 @@ pub fn quiet_button(p: Palette, active: bool) -> impl Fn(&Theme, button::Status)
             _ => None,
         },
         text_color: p.text,
-        border: rounded(6.0),
+        border: rounded(8.0),
         ..button::Style::default()
     }
 }
@@ -167,7 +184,7 @@ pub fn primary_button(p: Palette) -> impl Fn(&Theme, button::Status) -> button::
             .into(),
         ),
         text_color: p.on_accent,
-        border: rounded(7.0),
+        border: rounded(9.0),
         ..button::Style::default()
     }
 }
@@ -188,7 +205,7 @@ pub fn boxed_input(p: Palette) -> impl Fn(&Theme, text_input::Status) -> text_in
     move |_, status| text_input::Style {
         background: p.raised.into(),
         border: Border {
-            radius: 7.0.into(),
+            radius: 9.0.into(),
             width: 1.0,
             color: if matches!(status, text_input::Status::Focused { .. }) { p.accent } else { p.line },
         },
@@ -242,11 +259,13 @@ pub enum Icon {
     Tag,
     Flag,
     Moon,
+    Sun,
     Repeat,
     Search,
     Arrow,
     Gear,
     Lock,
+    Key,
     Notes,
     Box,
     Bell,
@@ -255,27 +274,31 @@ pub enum Icon {
 }
 
 impl Icon {
+    /// Outline plus a soft fill layer. The tint recolors both, so the fill
+    /// layer (alpha .2) reads as a lighter shade of the same hue.
     fn body(self) -> &'static str {
         match self {
-            Self::Inbox => r#"<path d="M3 13.5 5.5 5h13l2.5 8.5V19H3z"/><path d="M3 13.5h5.5l1 2.5h5l1-2.5H21"/>"#,
+            Self::Inbox => r#"<path d="M3 13.5 5.5 5h13l2.5 8.5V19H3z" fill="black" fill-opacity=".18" stroke="none"/><path d="M3 13.5 5.5 5h13l2.5 8.5V19H3z"/><path d="M3 13.5h5.5l1 2.5h5l1-2.5H21"/>"#,
             Self::Star => r#"<path d="m12 3.2 2.7 5.7 6.3.8-4.6 4.3 1.2 6.2-5.6-3.1-5.6 3.1 1.2-6.2L3 9.7l6.3-.8z" fill="black"/>"#,
-            Self::Calendar => r#"<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>"#,
-            Self::Layers => r#"<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 12.5 9 5 9-5"/><path d="m3 16.5 9 5 9-5" opacity=".5"/>"#,
-            Self::Archive => r#"<rect x="3" y="4" width="18" height="5" rx="1.2"/><path d="M5 9v10.5h14V9M10 13h4"/>"#,
-            Self::Book => r#"<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v18H6.5A1.5 1.5 0 0 1 5 19.5z"/><path d="m9 11 2.2 2.2L15.5 9"/>"#,
-            Self::Trash => r#"<path d="M4 6.5h16M9 6.5V4h6v2.5M6 6.5l1 14h10l1-14"/>"#,
+            Self::Calendar => r#"<rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="black" fill-opacity=".18" stroke="none"/><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>"#,
+            Self::Layers => r#"<path d="m12 3 9 5-9 5-9-5z" fill="black" fill-opacity=".22" stroke="none"/><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 12.5 9 5 9-5"/><path d="m3 16.5 9 5 9-5" opacity=".5"/>"#,
+            Self::Archive => r#"<rect x="3" y="4" width="18" height="5" rx="1.6" fill="black" fill-opacity=".22" stroke="none"/><rect x="3" y="4" width="18" height="5" rx="1.6"/><path d="M5 9v10.5h14V9M10 13h4"/>"#,
+            Self::Book => r#"<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v18H6.5A1.5 1.5 0 0 1 5 19.5z" fill="black" fill-opacity=".18" stroke="none"/><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v18H6.5A1.5 1.5 0 0 1 5 19.5z"/><path d="m9 11 2.2 2.2L15.5 9"/>"#,
+            Self::Trash => r#"<path d="M6 6.5l1 14h10l1-14z" fill="black" fill-opacity=".15" stroke="none"/><path d="M4 6.5h16M9 6.5V4h6v2.5M6 6.5l1 14h10l1-14"/>"#,
             Self::Plus => r#"<path d="M12 5v14M5 12h14"/>"#,
-            Self::Tag => r#"<path d="M3.5 4h8l9 9-8 8-9-9z"/><circle cx="8" cy="8.5" r="1.2" fill="black"/>"#,
-            Self::Flag => r#"<path d="M5.5 21V4M5.5 4.5h12.5l-2.8 4.2 2.8 4.3H5.5"/>"#,
+            Self::Tag => r#"<path d="M3.5 4h8l9 9-8 8-9-9z" fill="black" fill-opacity=".18" stroke="none"/><path d="M3.5 4h8l9 9-8 8-9-9z"/><circle cx="8" cy="8.5" r="1.2" fill="black"/>"#,
+            Self::Flag => r#"<path d="M5.5 4.5h12.5l-2.8 4.2 2.8 4.3H5.5z" fill="black" fill-opacity=".2" stroke="none"/><path d="M5.5 21V4M5.5 4.5h12.5l-2.8 4.2 2.8 4.3H5.5"/>"#,
             Self::Moon => r#"<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z" fill="black"/>"#,
+            Self::Sun => r#"<circle cx="12" cy="12" r="4.2" fill="black"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>"#,
             Self::Repeat => r#"<path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H20m0 0-3-3m3 3-3 3M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H4m0 0 3-3m-3 3 3 3"/>"#,
-            Self::Search => r#"<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>"#,
+            Self::Search => r#"<circle cx="10.5" cy="10.5" r="6.5" fill="black" fill-opacity=".12" stroke="none"/><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>"#,
             Self::Arrow => r#"<path d="M5 12h14m-5.5-5.5L19 12l-5.5 5.5"/>"#,
-            Self::Gear => r#"<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/>"#,
-            Self::Lock => r#"<rect x="4.5" y="10.5" width="15" height="10.5" rx="2.2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>"#,
+            Self::Gear => r#"<circle cx="12" cy="12" r="4" fill="black" fill-opacity=".18" stroke="none"/><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/>"#,
+            Self::Lock => r#"<rect x="4.5" y="10.5" width="15" height="10.5" rx="2.6" fill="black" fill-opacity=".2" stroke="none"/><rect x="4.5" y="10.5" width="15" height="10.5" rx="2.6"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>"#,
+            Self::Key => r#"<circle cx="8" cy="15" r="4.5" fill="black" fill-opacity=".2" stroke="none"/><circle cx="8" cy="15" r="4.5"/><path d="m11.2 11.8 8.3-8.3M16 7l2.5 2.5M13.5 9.5 15.5 11.5"/>"#,
             Self::Notes => r#"<path d="M5 6h14M5 11h14M5 16h9"/>"#,
-            Self::Box => r#"<circle cx="12" cy="12" r="8.5"/>"#,
-            Self::Bell => r#"<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 21h4"/>"#,
+            Self::Box => r#"<circle cx="12" cy="12" r="8.5" fill="black" fill-opacity=".14" stroke="none"/><circle cx="12" cy="12" r="8.5"/>"#,
+            Self::Bell => r#"<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" fill="black" fill-opacity=".18" stroke="none"/><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 21h4"/>"#,
             Self::Command => r#"<path d="m5 7 5 5-5 5M12.5 18H19"/>"#,
             Self::Check => r#"<path d="m5 12.5 4.5 4.5L19 7.5"/>"#,
         }

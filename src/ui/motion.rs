@@ -262,6 +262,10 @@ pub struct CheckMark {
     pub outline: Color,
     pub fill: Color,
     pub tick: Color,
+    /// Spare room around the box, so the completion ring can spread outside it.
+    pub pad: f32,
+    /// True while the box is being checked; the ring only plays in that direction.
+    pub rising: bool,
 }
 
 impl<Message> canvas::Program<Message> for CheckMark {
@@ -276,7 +280,7 @@ impl<Message> canvas::Program<Message> for CheckMark {
         _: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        let side = bounds.width.min(bounds.height);
+        let side = bounds.width.min(bounds.height) - 2.0 * self.pad;
         let t = self.progress.clamp(0.0, 1.0);
         // A small press-in that releases as the fill arrives.
         let pop = 1.0 - 0.14 * (t * std::f32::consts::PI).sin();
@@ -284,6 +288,21 @@ impl<Message> canvas::Program<Message> for CheckMark {
         let origin = Point::new((bounds.width - size) / 2.0, (bounds.height - size) / 2.0);
         let radius = if self.round { size / 2.0 } else { 4.0 };
         let shape = Path::rounded_rectangle(origin, Size::new(size, size), radius.into());
+        if self.rising && self.pad > 0.0 && t > 0.05 && t < 0.98 {
+            // One soft ring leaves the box as the fill arrives.
+            let k = (t - 0.05) / 0.93;
+            let reach = size / 2.0 + 1.0 + self.pad * k;
+            let fade = (1.0 - k) * (1.0 - k);
+            let middle = frame.center();
+            frame.stroke(
+                &Path::circle(middle, reach),
+                Stroke {
+                    style: stroke::Style::Solid(Color { a: self.fill.a * 0.55 * fade, ..self.fill }),
+                    width: 1.6 * (1.0 - 0.6 * k),
+                    ..Stroke::default()
+                },
+            );
+        }
         if t > 0.0 {
             frame.fill(&shape, Color { a: self.fill.a * t, ..self.fill });
         }
@@ -341,7 +360,8 @@ impl<Message> canvas::Program<Message> for CheckMark {
 }
 
 pub fn check_mark<'a, Message: 'a>(mark: CheckMark, side: f32) -> Element<'a, Message> {
-    Canvas::new(mark).width(side).height(side).into()
+    let full = side + 2.0 * mark.pad;
+    Canvas::new(mark).width(full).height(full).into()
 }
 
 /// A project's progress ring and pie.

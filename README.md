@@ -77,7 +77,13 @@ The library is one file, `~/.local/share/gotodo/vault.gotodo`, with mode `0600`.
 - The app locks itself after 15 minutes without input, or with Ctrl+L.
 - Reminders say only "A to-do is due" unless you enable titles in Settings.
 
-**KeePassXC.** Enable Tools > Settings > Secret Service Integration, expose a
+**KeePassXC, in short.** gotodo keeps a random key inside your KeePassXC
+database. While that database is unlocked, gotodo opens by itself, with no
+password to type. Lock KeePassXC and gotodo locks too. A short guide in the app
+(shown after you create a vault, and under Settings > Unlock with KeePassXC)
+walks through the three steps and ticks them off as they happen. The details:
+
+**KeePassXC setup.** Enable Tools > Settings > Secret Service Integration, expose a
 group under Database Settings > Secret Service Integration, then choose Connect
 KeePassXC in gotodo's settings. gotodo stores a random secret in that group, so
 it can only read it while the database is unlocked. If KeePassXC locks or quits,

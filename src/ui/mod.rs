@@ -195,6 +195,8 @@ pub struct App {
     pub view_anim: Spring,
     pub sheet: Option<Sheet>,
     pub sheet_anim: Spring,
+    pub quick_anim: Spring,
+    quick_closing: bool,
     pub query: String,
     pub sheet_index: usize,
 
@@ -324,6 +326,8 @@ impl App {
             view_anim: Spring::at(1.0),
             sheet: None,
             sheet_anim: Spring::at(0.0),
+            quick_anim: Spring::at(1.0),
+            quick_closing: false,
             query: String::new(),
             sheet_index: 0,
             drag: None,
@@ -360,6 +364,9 @@ impl App {
         let (id, open) = window::open(quick_settings());
         self.quick = Some(id);
         self.quick_text.clear();
+        self.quick_closing = false;
+        self.quick_anim = Spring::at(0.0);
+        self.quick_anim.to(1.0);
         open.map(Message::Opened)
     }
 
@@ -415,6 +422,7 @@ impl App {
     fn animating(&self) -> bool {
         !self.view_anim.settled()
             || !self.sheet_anim.settled()
+            || !self.quick_anim.settled()
             || !self.ghosts.is_empty()
             || self.rows.values().any(|a| !a.settled())
     }
@@ -636,7 +644,11 @@ impl App {
         self.query.clear();
         self.sheet_index = 0;
         self.security_note = None;
-        operation::focus(sheet_id())
+        let focus = operation::focus(sheet_id());
+        if matches!(sheet, Sheet::KeePass | Sheet::Settings) {
+            return IcedTask::batch([focus, Self::probe(false)]);
+        }
+        focus
     }
 
     fn close_sheet(&mut self) -> Task2 {
@@ -1071,7 +1083,7 @@ impl App {
                 }
                 return self.go(View::Inbox);
             }
-            Cmd::ConnectKeePass => return self.update(Message::KeePassConnect),
+            Cmd::ConnectKeePass => return self.open_sheet(Sheet::KeePass),
             Cmd::DisconnectKeePass => return self.update(Message::KeePassDisconnect),
             Cmd::Go(view) => return self.go(view),
         }
@@ -1202,10 +1214,16 @@ impl App {
     }
 
     fn close_quick(&mut self) -> Task2 {
-        match self.quick {
-            Some(id) => window::close(id),
-            None => IcedTask::none(),
+        let Some(id) = self.quick else { return IcedTask::none() };
+        if self.reduce_motion() {
+            return window::close(id);
         }
+        // Ease out first; on_frame closes the window once the spring settles.
+        if !self.quick_closing {
+            self.quick_closing = true;
+            self.quick_anim.to(0.0);
+        }
+        IcedTask::none()
     }
 
     fn submit_quick(&mut self) -> Task2 {
@@ -1353,8 +1371,10 @@ impl App {
             tasks.push(blocking(move || notify(&body), |()| Message::Ignored));
         }
 
-        if self.session.as_ref().is_some_and(|s| s.via_keepass)
-            && self.last_probe.elapsed() >= Duration::from_secs(3)
+        let watching = matches!(self.sheet, Some(Sheet::KeePass | Sheet::Settings));
+        let every = if watching { Duration::from_millis(1200) } else { Duration::from_secs(3) };
+        if (watching || self.session.as_ref().is_some_and(|s| s.via_keepass))
+            && self.last_probe.elapsed() >= every
         {
             self.last_probe = Instant::now();
             tasks.push(Self::probe(false));
@@ -1362,12 +1382,13 @@ impl App {
         IcedTask::batch(tasks)
     }
 
-    fn on_frame(&mut self, now: Instant) {
+    fn on_frame(&mut self, now: Instant) -> Task2 {
         let dt = self.last_frame.map_or(1.0 / 60.0, |last| (now - last).as_secs_f32());
         self.last_frame = Some(now);
         let reduce = self.reduce_motion();
         self.view_anim.step(dt, reduce);
         self.sheet_anim.step(dt, reduce);
+        self.quick_anim.step(dt, reduce);
         if self.sheet_anim.settled() && self.sheet_anim.target < 0.5 {
             self.sheet = None;
         }
@@ -1395,6 +1416,13 @@ impl App {
         if !self.animating() {
             self.last_frame = None;
         }
+        if self.quick_closing && self.quick_anim.settled() {
+            self.quick_closing = false;
+            if let Some(id) = self.quick {
+                return window::close(id);
+            }
+        }
+        IcedTask::none()
     }
 
     fn change_setting(&mut self, change: SettingChange) {
@@ -1455,6 +1483,7 @@ impl App {
             Message::Closed(id) => {
                 if Some(id) == self.quick {
                     self.quick = None;
+                    self.quick_closing = false;
                     self.quick_text.zeroize();
                 }
                 if Some(id) == self.main {
@@ -1468,6 +1497,10 @@ impl App {
                 }
             }
             Message::Ipc(ipc::Command::QuickEntry) if !matches!(self.auth, Auth::Setup) => {
+                // The same shortcut that opens Quick Entry also dismisses it.
+                if self.quick.is_some() {
+                    return self.close_quick();
+                }
                 return self.open_quick();
             }
             Message::Ipc(ipc::Command::QuickEntry) => {}
@@ -1477,7 +1510,7 @@ impl App {
                     None => self.open_main(),
                 };
             }
-            Message::Frame(now) => self.on_frame(now),
+            Message::Frame(now) => return self.on_frame(now),
             Message::Tick => return self.on_tick(),
             Message::Key(press) => return self.on_key(press),
             Message::ModifiersChanged(modifiers) => self.modifiers = modifiers,
@@ -1515,7 +1548,15 @@ impl App {
             Message::AuthDone(result) => {
                 self.auth_busy = false;
                 match result.lock().expect("result slot").take() {
-                    Some(Ok(session)) => return self.finish_unlock(session),
+                    Some(Ok(session)) => {
+                        // A brand-new vault starts with a short, plain KeePassXC explanation.
+                        let first_run = matches!(self.auth, Auth::Setup);
+                        let unlocked = self.finish_unlock(session);
+                        if first_run {
+                            return IcedTask::batch([unlocked, self.open_sheet(Sheet::KeePass)]);
+                        }
+                        return unlocked;
+                    }
                     Some(Err(error)) => {
                         self.auth_error = Some(error);
                         return operation::focus(auth_id());
@@ -1760,7 +1801,7 @@ impl App {
     }
 
     fn pick(&mut self, index: usize) -> Task2 {
-        if matches!(self.sheet, Some(Sheet::Settings | Sheet::Help)) {
+        if matches!(self.sheet, Some(Sheet::Settings | Sheet::Help | Sheet::KeePass)) {
             return IcedTask::none();
         }
         match self.sheet_items().into_iter().nth(index).map(|item| item.act) {

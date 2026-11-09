@@ -75,7 +75,7 @@ fn settle(app: &mut App) {
     let mut now = Instant::now();
     for _ in 0..240 {
         now += Duration::from_millis(16);
-        app.on_frame(now);
+        let _ = app.on_frame(now);
         if !app.animating() {
             break;
         }

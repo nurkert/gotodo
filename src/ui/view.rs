@@ -3,7 +3,7 @@
 use chrono::{Datelike, NaiveDate};
 use iced::widget::{
     Column, Row, button, center, column, container, hover, mouse_area, opaque, pin, row, scrollable, slider, space, stack,
-    text, text_editor, text_input, toggler,
+    text, text_editor, text_input, toggler, tooltip,
 };
 use iced::{Alignment, Color, Element, Length, Padding, Point, mouse, window};
 
@@ -22,6 +22,10 @@ type El<'a> = Element<'a, Message>;
 
 const SIDEBAR: f32 = 246.0;
 const CONTENT_MAX: f32 = 720.0;
+/// Left edge shared by the page title, section headers and the check boxes.
+const ROW_INSET: f32 = 12.0;
+/// Room around each check box for the completion ring.
+const CHECK_PAD: f32 = 4.0;
 
 fn view_title(lib: &Library, view: View) -> String {
     match view {
@@ -45,16 +49,26 @@ fn view_icon(view: View, p: Palette) -> (Icon, Color) {
     match view {
         View::Inbox => (Icon::Inbox, p.accent),
         View::Today => (Icon::Star, p.gold),
-        View::Upcoming => (Icon::Calendar, p.red),
+        View::Upcoming => (Icon::Calendar, p.violet),
         View::Anytime => (Icon::Layers, p.teal),
         View::Someday => (Icon::Archive, p.sand),
         View::Logbook => (Icon::Book, p.green),
         View::Trash => (Icon::Trash, p.muted),
         View::Deadlines => (Icon::Flag, p.red),
-        View::Repeating => (Icon::Repeat, p.accent),
+        View::Repeating => (Icon::Repeat, p.violet),
         View::AllProjects | View::Project(_) => (Icon::Box, p.accent),
         View::Area(_) => (Icon::Layers, p.teal),
         View::Tag(_) => (Icon::Tag, p.teal),
+    }
+}
+
+fn mix(from: Color, to: Color, k: f32) -> Color {
+    let k = k.clamp(0.0, 1.0);
+    Color {
+        r: from.r + (to.r - from.r) * k,
+        g: from.g + (to.g - from.g) * k,
+        b: from.b + (to.b - from.b) * k,
+        a: from.a + (to.a - from.a) * k,
     }
 }
 
@@ -270,9 +284,19 @@ impl App {
             }
         }
 
+        let (theme_icon, next_look) = if p.dark { (Icon::Sun, Appearance::Light) } else { (Icon::Moon, Appearance::Dark) };
+        let theme_toggle = self.with_tip(
+            button(icon(theme_icon, 17, p.muted))
+                .padding(7)
+                .on_press(Message::Setting(SettingChange::Appearance(next_look)))
+                .style(style::quiet_button(p, false))
+                .into(),
+            t(if p.dark { "Light" } else { "Dark" }).to_owned(),
+        );
         let footer = row![
             self.tool_button(Icon::Plus, Cmd::NewProject),
             space().width(Length::Fill),
+            theme_toggle,
             self.tool_button(Icon::Lock, Cmd::Lock),
             self.tool_button(Icon::Gear, Cmd::Settings),
         ]
@@ -284,10 +308,26 @@ impl App {
 
     fn tool_button(&self, which: Icon, cmd: Cmd) -> El<'_> {
         let p = self.palette();
-        button(icon(which, 17, p.muted))
+        let words = keys::BINDINGS
+            .iter()
+            .find(|b| b.cmd == cmd)
+            .map_or_else(String::new, |b| format!("{}   {}", t(b.label), keys::chord_label(b)));
+        let control = button(icon(which, 17, p.muted))
             .padding(7)
             .on_press(Message::Command(cmd))
-            .style(style::quiet_button(p, false))
+            .style(style::quiet_button(p, false));
+        self.with_tip(control.into(), words)
+    }
+
+    /// Icon-only controls name themselves, and their shortcut, on hover.
+    fn with_tip<'a>(&self, control: El<'a>, words: String) -> El<'a> {
+        let p = self.palette();
+        if words.is_empty() {
+            return control;
+        }
+        tooltip(control, container(label(words, 12, p.text)).padding([5, 9]), tooltip::Position::Top)
+            .style(style::tip(p))
+            .gap(6)
             .into()
     }
 
@@ -295,7 +335,7 @@ impl App {
         let p = self.palette();
         let Some(lib) = self.lib() else { return space().into() };
         let (which, tint) = view_icon(self.view, p);
-        let mut head = Row::new().spacing(12).align_y(Alignment::Center);
+        let mut head = Row::new().spacing(12).align_y(Alignment::Center).padding(Padding { left: ROW_INSET, ..Padding::ZERO });
         head = head.push(match self.view {
             View::Project(id) => pie(lib.progress(id), p.accent, 26.0),
             _ => icon(which, 28, tint),
@@ -314,7 +354,7 @@ impl App {
                     .placeholder(t("Notes"))
                     .on_action(Message::ProjectNotes)
                     .size(14)
-                    .padding(Padding { top: 4.0, right: 0.0, bottom: 4.0, left: 2.0 })
+                    .padding(Padding { top: 4.0, right: 0.0, bottom: 4.0, left: ROW_INSET })
                     .style(style::bare_editor(p)),
             );
         }
@@ -326,7 +366,7 @@ impl App {
         let empty = self.flat.is_empty() && self.sections.iter().all(|s| s.previews.is_empty() && s.heading.is_none());
         if empty {
             page = page.push(
-                container(column![icon(which, 44, Color { a: 0.32, ..tint }), label(t("Nothing here"), 14, p.faint)].spacing(10).align_x(Alignment::Center))
+                container(column![icon(which, 44, Color { a: 0.32, ..tint }), label(t("Nothing here"), 14, p.muted), label(t("Press Ctrl+N to add a to-do"), 12.5, p.faint)].spacing(8).align_x(Alignment::Center))
                     .width(Length::Fill)
                     .padding(Padding { top: 90.0, ..Padding::ZERO })
                     .center_x(Length::Fill),
@@ -347,6 +387,7 @@ impl App {
             column = column.push(container(label(format!("{}: {error}", t("Could not save")), 12, p.red)).padding([6, 16]));
         }
         column
+            .push(container(space()).height(1).width(Length::Fill).style(style::panel(p.line)))
             .push(
                 container(
                     row![
@@ -394,7 +435,7 @@ impl App {
                     }),
             );
         }
-        Some(bar.wrap().vertical_spacing(5).into())
+        Some(container(bar.wrap().vertical_spacing(5)).padding(Padding { left: ROW_INSET, ..Padding::ZERO }).into())
     }
 
     fn section_view<'a>(&'a self, lib: &'a Library, section: &'a Section) -> Option<El<'a>> {
@@ -432,7 +473,7 @@ impl App {
         if section.evening {
             return row![icon(Icon::Moon, 15, p.accent), label(t("This Evening"), 14, p.text).font(SEMIBOLD)]
                 .spacing(7)
-                .padding(Padding { top: 8.0, bottom: 7.0, left: 2.0, right: 0.0 })
+                .padding(Padding { top: 8.0, bottom: 7.0, left: ROW_INSET, right: 0.0 })
                 .align_y(Alignment::Center)
                 .into();
         }
@@ -461,7 +502,7 @@ impl App {
         let selected = self.selection.contains(&id);
 
         let leading: El<'a> = if task.kind == Kind::Project {
-            pie(lib.progress(id), p.accent, 17.0)
+            container(pie(lib.progress(id), p.accent, 17.0)).padding(CHECK_PAD).into()
         } else {
             mouse_area(check_mark(
                 CheckMark {
@@ -471,6 +512,8 @@ impl App {
                     outline: if task.deadline.is_some_and(|d| d <= today) && task.is_open() { p.red } else { p.faint },
                     fill: if task.status == Status::Canceled { p.faint } else { p.accent },
                     tick: p.on_accent,
+                    pad: CHECK_PAD,
+                    rising: anim.check.target > 0.5,
                 },
                 17.0,
             ))
@@ -479,8 +522,7 @@ impl App {
             .into()
         };
 
-        let done = !task.is_open();
-        let mut head = Row::new().spacing(11).align_y(Alignment::Center).push(leading);
+        let mut head = Row::new().spacing(11.0 - CHECK_PAD).align_y(Alignment::Center).push(leading);
         if is_open_row {
             head = head.push(
                 text_input(t("New to-do"), &self.title)
@@ -497,7 +539,8 @@ impl App {
                 head = head.push(icon(if task.evening { Icon::Moon } else { Icon::Star }, 13, if task.evening { p.accent } else { p.gold }));
             }
             let title = if task.title.is_empty() { t("New to-do") } else { task.title.as_str() };
-            let color = if done || task.title.is_empty() { p.faint } else { p.text };
+            // The title settles into its faded look together with the check mark.
+            let color = if task.title.is_empty() { p.faint } else { mix(p.text, p.faint, anim.check.value) };
             head = head.push(label(title, 14, color).wrapping(text::Wrapping::None));
             head = head.push(self.row_badges(lib, task));
         }
@@ -509,9 +552,9 @@ impl App {
             body = body.push(reveal(details).progress(progress).fade(1.0 - progress.min(1.0), p.raised));
         }
 
-        let inset = 12.0 * progress.min(1.0) + 12.0 * (1.0 - progress.min(1.0));
-        let vertical = 6.0 + 7.0 * progress.min(1.0);
-        let inner = container(body).padding(Padding { top: vertical, bottom: vertical, left: inset, right: inset }).width(Length::Fill);
+        let inset = ROW_INSET - CHECK_PAD;
+        let vertical = 6.5 + 7.0 * progress.min(1.0);
+        let inner = container(body).padding(Padding { top: vertical, bottom: vertical, left: inset, right: ROW_INSET }).width(Length::Fill);
         let dropping = self.drop_target == Some(DropTarget::Row(id));
         let styled: El<'a> = if progress > 0.5 {
             container(inner).style(style::open_row(p)).into()
@@ -584,7 +627,7 @@ impl App {
 
     fn closing_details<'a>(&'a self, task: &'a Task) -> El<'a> {
         let p = self.palette();
-        let mut out = Column::new().spacing(6).padding(Padding { top: 8.0, left: 28.0, ..Padding::ZERO });
+        let mut out = Column::new().spacing(6).padding(Padding { top: 8.0, left: 32.0, ..Padding::ZERO });
         if !task.notes.is_empty() {
             out = out.push(label(task.notes.as_str(), 14, p.muted));
         }
@@ -600,7 +643,7 @@ impl App {
         let today = self.today();
         let mut out = Column::new()
             .spacing(8)
-            .padding(Padding { top: 8.0, right: 0.0, bottom: 2.0, left: 28.0 })
+            .padding(Padding { top: 8.0, right: 0.0, bottom: 2.0, left: 32.0 })
             .push(
                 text_editor(&self.notes)
                     .placeholder(t("Notes"))
@@ -620,6 +663,8 @@ impl App {
                     outline: p.faint,
                     fill: p.accent,
                     tick: p.on_accent,
+                    pad: 0.0,
+                    rising: false,
                 },
                 14.0,
             ))
@@ -694,6 +739,7 @@ impl App {
         let card: El<'_> = match self.sheet {
             Some(Sheet::Settings) => self.settings_sheet(),
             Some(Sheet::Help) => self.help_sheet(),
+            Some(Sheet::KeePass) => self.keepass_sheet(),
             _ => self.picker_sheet(),
         };
         let top = 64.0 - (1.0 - t_value) * 14.0;
@@ -809,16 +855,22 @@ impl App {
         };
 
         let connected = self.has_vault_keepass();
-        let keepass_ready = self.keepass == keepass::Status::Unlocked;
-        let keepass_button: El<'_> = if connected {
-            button(text(t("Disconnect KeePassXC")).size(13)).padding([6, 10]).on_press(Message::KeePassDisconnect).style(style::quiet_button(p, false)).into()
-        } else {
-            button(text(t("Connect KeePassXC")).size(13).color(p.on_accent))
+        let keepass_line: El<'_> = row![
+            icon(Icon::Key, 16, if connected { p.green } else { p.muted }),
+            column![
+                label(t("Unlock with KeePassXC"), 13, p.text),
+                label(if connected { t("Connected") } else { keepass_status_text(self.keepass) }, 12, p.muted),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            button(text(if connected { t("Manage") } else { t("Set up") }).size(13))
                 .padding([6, 12])
-                .on_press_maybe(keepass_ready.then_some(Message::KeePassConnect))
-                .style(style::primary_button(p))
-                .into()
-        };
+                .on_press(Message::Command(Cmd::ConnectKeePass))
+                .style(style::quiet_button(p, false)),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .into();
 
         let change_ready = !self.password_old.is_empty() && self.password_new.chars().count() >= MIN_PASSWORD_CHARS;
         let mut security = Column::new()
@@ -826,12 +878,7 @@ impl App {
             .push(heading_label(t("Security"), p))
             .push(setting_line("Auto-lock after", lock.into()))
             .push(toggle("Show titles in reminders", s.reminder_shows_title, SettingChange::ReminderTitles))
-            .push(row![label(keepass_status_text(self.keepass), 13, p.text).width(Length::Fill), keepass_button].align_y(Alignment::Center));
-        if !keepass_ready && !connected {
-            security = security.push(
-                label(t("In KeePassXC, enable Secret Service Integration and expose a group for this database."), 12, p.muted).line_height(1.4),
-            );
-        }
+            .push(keepass_line);
         security = security.push(
             row![
                 text_input(t("Current password"), &self.password_old).secure(true).on_input(Message::PasswordOld).padding(7).size(13).style(style::boxed_input(p)),
@@ -861,6 +908,112 @@ impl App {
         container(scrollable(body).style(hidden_scrollbar(p))).max_height(560).padding(22).style(style::card(p)).into()
     }
 
+    /// Plain-language walkthrough for the KeePassXC connection. Each step ticks
+    /// itself as soon as the machine is ready, so it reads as progress, not a manual.
+    fn keepass_sheet(&self) -> El<'_> {
+        let p = self.palette();
+        let status = self.keepass;
+        let connected = self.has_vault_keepass();
+        let running = matches!(status, keepass::Status::Locked | keepass::Status::Unlocked);
+        let unlocked = status == keepass::Status::Unlocked;
+
+        let step = |done: bool, title: &'static str, detail: &'static str| -> El<'static> {
+            row![
+                check_mark(
+                    CheckMark {
+                        progress: if done { 1.0 } else { 0.0 },
+                        canceled: false,
+                        round: true,
+                        outline: p.faint,
+                        fill: p.green,
+                        tick: p.on_accent,
+                        pad: 0.0,
+                        rising: false,
+                    },
+                    20.0,
+                ),
+                column![
+                    label(t(title), 14, if done { p.muted } else { p.text }).font(MEDIUM),
+                    label(t(detail), 12.5, p.muted).line_height(1.4),
+                ]
+                .spacing(2)
+                .width(Length::Fill),
+            ]
+            .spacing(12)
+            .into()
+        };
+
+        let action: El<'_> = if connected {
+            button(center(text(t("Disconnect KeePassXC")).size(14)))
+                .height(38)
+                .width(Length::Fill)
+                .on_press(Message::KeePassDisconnect)
+                .style(style::quiet_button(p, false))
+                .into()
+        } else {
+            button(center(text(t("Connect KeePassXC")).size(14).font(MEDIUM)))
+                .height(38)
+                .width(Length::Fill)
+                .on_press_maybe(unlocked.then_some(Message::KeePassConnect))
+                .style(style::primary_button(p))
+                .into()
+        };
+
+        let hint = if connected {
+            t("Done. Next time, gotodo opens by itself while KeePassXC is unlocked.")
+        } else if status == keepass::Status::OtherProvider {
+            t("Another secret service is running, not KeePassXC")
+        } else if unlocked {
+            t("Everything is ready. One click connects it.")
+        } else {
+            t("This page updates by itself while you set things up in KeePassXC.")
+        };
+
+        let mut body = Column::new()
+            .spacing(16)
+            .width(460)
+            .push(
+                row![
+                    container(icon(Icon::Key, 22, p.accent)).padding(10).style(style::chip(p, p.accent)),
+                    column![
+                        label(t("Unlock with KeePassXC"), 19, p.text).font(SEMIBOLD),
+                        label(t("No password to type. gotodo opens whenever your KeePassXC database is unlocked."), 13, p.muted)
+                            .line_height(1.45),
+                    ]
+                    .spacing(3)
+                    .width(Length::Fill),
+                ]
+                .spacing(14)
+                .align_y(Alignment::Center),
+            )
+            .push(
+                column![
+                    step(
+                        running,
+                        "Turn on Secret Service in KeePassXC",
+                        "Tools › Settings › Secret Service Integration, then expose a group for this database.",
+                    ),
+                    step(unlocked, "Unlock your database", "Open it the way you always do."),
+                    step(connected, "Connect", "gotodo stores a random key in that group. It never leaves KeePassXC."),
+                ]
+                .spacing(14),
+            )
+            .push(label(hint, 12.5, if status == keepass::Status::OtherProvider { p.red } else { p.muted }))
+            .push(action);
+        if let Some(note) = &self.security_note {
+            body = body.push(label(note.as_str(), 12.5, p.muted));
+        }
+        body = body.push(
+            label(
+                t("Lock KeePassXC and gotodo locks with it. Your password keeps working either way."),
+                12,
+                p.faint,
+            )
+            .line_height(1.45),
+        );
+        container(body).padding(24).style(style::card(p)).into()
+    }
+
     fn quick_view(&self) -> El<'_> {
         let p = self.palette();
         let content: El<'_> = if !matches!(self.auth, Auth::Open) {
@@ -881,6 +1034,8 @@ impl App {
             .spacing(13)
             .into()
         };
+        let k = self.quick_anim.value.clamp(0.0, 1.0);
+        let content: El<'_> = reveal(content).fade(1.0 - k, p.raised).slide((1.0 - k) * 10.0).into();
         container(
             container(content)
                 .padding([17, 18])
@@ -995,7 +1150,7 @@ fn upcoming_header<'a>(date: NaiveDate, today: NaiveDate, p: Palette) -> El<'a> 
         .spacing(9)
         .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 6.0, bottom: 6.0, left: 2.0, right: 0.0 })
+    .padding(Padding { top: 6.0, bottom: 6.0, left: ROW_INSET, right: 0.0 })
     .into()
 }
 
@@ -1017,7 +1172,7 @@ fn heading_header<'a>(id: crate::model::Id, title: String, p: Palette) -> El<'a>
     ]
     .align_y(Alignment::Center);
     column![
-        container(line).padding(Padding { top: 8.0, bottom: 4.0, left: 2.0, right: 0.0 }),
+        container(line).padding(Padding { top: 8.0, bottom: 4.0, left: ROW_INSET, right: 0.0 }),
         container(space()).height(1).width(Length::Fill).style(style::panel(p.line)),
         space().height(4),
     ]
@@ -1030,8 +1185,9 @@ fn group_header<'a>(title: String, p: Palette, link: Option<View>) -> El<'a> {
         Some(view) => button(name).padding([2, 4]).on_press(Message::Go(view)).style(style::quiet_button(p, false)).into(),
         None => name.into(),
     };
+    let left = if link.is_some() { ROW_INSET - 4.0 } else { ROW_INSET };
     column![
-        container(content).padding(Padding { top: 8.0, bottom: 5.0, left: 2.0, right: 0.0 }),
+        container(content).padding(Padding { top: 8.0, bottom: 5.0, left, right: 0.0 }),
         container(space()).height(1).width(Length::Fill).style(style::panel(p.line)),
         space().height(4),
     ]
