@@ -43,8 +43,6 @@ type Task2 = IcedTask<Message>;
 type Slot<T> = Arc<Mutex<Option<T>>>;
 
 const QUICK_SIZE: Size = Size::new(580.0, 102.0);
-/// The popup opens at this height and grows to QUICK_SIZE.
-const QUICK_MIN_HEIGHT: f32 = 44.0;
 pub const SIDEBAR_MIN: f32 = 180.0;
 pub const SIDEBAR_MAX: f32 = 420.0;
 const LOG_DELAY: Duration = Duration::from_millis(1100);
@@ -293,8 +291,8 @@ fn main_settings() -> window::Settings {
 /// being tiled. It stays opaque because software rendering has no alpha.
 fn quick_settings() -> window::Settings {
     window::Settings {
-        size: Size::new(QUICK_SIZE.width, QUICK_MIN_HEIGHT),
-        min_size: Some(Size::new(QUICK_SIZE.width, QUICK_MIN_HEIGHT)),
+        size: QUICK_SIZE,
+        min_size: Some(QUICK_SIZE),
         max_size: Some(QUICK_SIZE),
         resizable: false,
         decorations: false,
@@ -1472,12 +1470,6 @@ impl App {
         self.view_anim.step(dt, reduce);
         self.sheet_anim.step(dt, reduce);
         self.quick_anim.step(dt, reduce);
-        let mut tasks = Vec::new();
-        if let Some(id) = self.quick.filter(|_| !(self.quick_closing && self.quick_anim.settled())) {
-            let k = self.quick_anim.value.clamp(0.0, 1.0);
-            let height = QUICK_MIN_HEIGHT + (QUICK_SIZE.height - QUICK_MIN_HEIGHT) * k;
-            tasks.push(window::resize(id, Size::new(QUICK_SIZE.width, height)));
-        }
         if self.sheet_anim.settled() && self.sheet_anim.target < 0.5 {
             self.sheet = None;
         }
@@ -1511,7 +1503,7 @@ impl App {
                 return window::close(id);
             }
         }
-        IcedTask::batch(tasks)
+        IcedTask::none()
     }
 
     fn change_setting(&mut self, change: SettingChange) {

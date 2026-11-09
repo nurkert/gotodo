@@ -1154,7 +1154,7 @@ impl App {
             .into()
         };
         let k = self.quick_anim.value.clamp(0.0, 1.0);
-        let content: El<'_> = reveal(content).fade(1.0 - k, p.raised).slide((1.0 - k) * 10.0).into();
+        let content: El<'_> = reveal(content).fade(1.0 - k, p.raised).slide((1.0 - k) * 6.0).into();
         container(
             container(content)
                 .padding([17, 18])
