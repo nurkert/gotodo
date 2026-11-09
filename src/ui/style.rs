@@ -114,23 +114,10 @@ pub fn open_row(p: Palette) -> impl Fn(&Theme) -> container::Style {
 }
 
 /// The Quick Entry card. `a` fades the whole card, shadow included.
-pub fn quick_card(p: Palette, a: f32, see_through: bool) -> impl Fn(&Theme) -> container::Style {
+/// No border, radius or shadow of our own: the compositor frames the window.
+pub fn quick_card(p: Palette, a: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(Color { a: p.raised.a * a, ..p.raised }.into()),
-        border: Border {
-            radius: if see_through { 16.0 } else { 0.0 }.into(),
-            width: 1.0,
-            color: Color { a: p.line.a * a, ..p.line },
-        },
-        shadow: if see_through {
-            Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, (if p.dark { 0.5 } else { 0.2 }) * a),
-                offset: Vector::new(0.0, 6.0),
-                blur_radius: 22.0,
-            }
-        } else {
-            Shadow::default()
-        },
         ..container::Style::default()
     }
 }

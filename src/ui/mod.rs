@@ -44,9 +44,9 @@ type Slot<T> = Arc<Mutex<Option<T>>>;
 
 /// The visible popup card.
 pub const QUICK_CARD: Size = Size::new(580.0, 102.0);
-/// Room around the card for its shadow; the window is the card plus this on every side.
-const QUICK_MARGIN: f32 = 28.0;
-const QUICK_SIZE: Size = Size::new(QUICK_CARD.width + 2.0 * QUICK_MARGIN, QUICK_CARD.height + 2.0 * QUICK_MARGIN);
+/// The window is exactly the card, so compositor effects (blur, border,
+/// shadow, rounded corners) wrap the popup and nothing else.
+const QUICK_SIZE: Size = QUICK_CARD;
 
 /// The popup window is see-through so the card can fade and lift as one piece.
 /// Set GOTODO_OPAQUE=1 on a setup whose renderer has no alpha channel.

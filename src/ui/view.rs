@@ -1159,24 +1159,24 @@ impl App {
                 reveal(self.quick_meta()).fade(1.0 - meta_a, p.raised).slide((1.0 - meta_a) * 4.0).into()
             };
             column![
-                row![icon(Icon::Plus, 19, Color { a: input_a, ..p.accent }), input]
-                    .spacing(11)
-                    .align_y(Alignment::Center),
+                // Icons cannot fade, so the plus switches on and off mid-way instead.
+                row![
+                    if input_a > 0.5 { icon(Icon::Plus, 19, p.accent) } else { space().width(19).height(19).into() },
+                    input
+                ]
+                .spacing(11)
+                .align_y(Alignment::Center),
                 meta,
             ]
             .spacing(13)
             .into()
         };
 
-        let card = container(content)
+        container(content)
             .padding([17, 18])
-            .width(super::QUICK_CARD.width)
-            .height(super::QUICK_CARD.height)
-            .style(style::quick_card(p, card_a, see_through));
-        let lift = if see_through { (1.0 - k) * 12.0 } else { 0.0 };
-        center(card)
-            .padding(Padding { top: lift, ..Padding::ZERO })
-            .style(style::panel(if see_through { Color::TRANSPARENT } else { p.raised }))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(style::quick_card(p, card_a))
             .into()
     }
 
