@@ -28,6 +28,14 @@ No `for_window` rule is needed: the popup has a fixed size, so Sway floats and
 centers it instead of tiling it. Its `app_id` is `gotodo-quick` if you want to
 style it. The main window's `app_id` is `gotodo`.
 
+**GNOME.** Add a custom shortcut under Settings > Keyboard > Keyboard Shortcuts >
+Custom Shortcuts with the command `gotodo quick`. GNOME does not let an app place
+itself or stay on top, so the popup appears where the compositor puts it. The
+shortcut also hands focus over only if GNOME grants it to the running app; if
+typing does not start right away, click the popup once. The popup uses a
+see-through window so it can fade in as one piece. If your renderer shows black
+corners, start gotodo with `GOTODO_OPAQUE=1`.
+
 Type the title and add details inline. Tab completes the suggestion, Enter
 saves, Shift+Enter saves and stays open for the next one, Esc closes.
 

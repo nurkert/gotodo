@@ -1135,6 +1135,13 @@ impl App {
 
     fn quick_view(&self) -> El<'_> {
         let p = self.palette();
+        let see_through = super::quick_transparent();
+        let k = self.quick_anim.value.clamp(0.0, 1.0);
+        // One spring drives three staggered stages: the card, the input, the details.
+        let card_a = if see_through { (k / 0.4).min(1.0) } else { 1.0 };
+        let input_a = ((k - 0.12) / 0.55).clamp(0.0, 1.0);
+        let meta_a = ((k - 0.30) / 0.60).clamp(0.0, 1.0);
+
         let content: El<'_> = if !matches!(self.auth, Auth::Open) {
             self.auth_card(true)
         } else {
@@ -1145,30 +1152,32 @@ impl App {
                 .padding(0)
                 .size(17)
                 .font(MEDIUM)
-                .style(style::bare_input(p));
+                .style(style::fading_input(p, input_a));
+            let meta: El<'_> = if meta_a < 0.03 {
+                space().height(24).into()
+            } else {
+                reveal(self.quick_meta()).fade(1.0 - meta_a, p.raised).slide((1.0 - meta_a) * 4.0).into()
+            };
             column![
-                row![icon(Icon::Plus, 19, p.accent), input].spacing(11).align_y(Alignment::Center),
-                self.quick_meta(),
+                row![icon(Icon::Plus, 19, Color { a: input_a, ..p.accent }), input]
+                    .spacing(11)
+                    .align_y(Alignment::Center),
+                meta,
             ]
             .spacing(13)
             .into()
         };
-        let k = self.quick_anim.value.clamp(0.0, 1.0);
-        let content: El<'_> = reveal(content).fade(1.0 - k, p.raised).slide((1.0 - k) * 6.0).into();
-        container(
-            container(content)
-                .padding([17, 18])
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(move |_| iced::widget::container::Style {
-                    background: Some(p.raised.into()),
-                    border: iced::Border { width: 1.0, color: p.line, ..Default::default() },
-                    ..Default::default()
-                }),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+
+        let card = container(content)
+            .padding([17, 18])
+            .width(super::QUICK_CARD.width)
+            .height(super::QUICK_CARD.height)
+            .style(style::quick_card(p, card_a, see_through));
+        let lift = if see_through { (1.0 - k) * 12.0 } else { 0.0 };
+        center(card)
+            .padding(Padding { top: lift, ..Padding::ZERO })
+            .style(style::panel(if see_through { Color::TRANSPARENT } else { p.raised }))
+            .into()
     }
 
     fn quick_meta(&self) -> El<'_> {

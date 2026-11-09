@@ -42,7 +42,18 @@ pub fn default_font() -> iced::Font {
 type Task2 = IcedTask<Message>;
 type Slot<T> = Arc<Mutex<Option<T>>>;
 
-const QUICK_SIZE: Size = Size::new(580.0, 102.0);
+/// The visible popup card.
+pub const QUICK_CARD: Size = Size::new(580.0, 102.0);
+/// Room around the card for its shadow; the window is the card plus this on every side.
+const QUICK_MARGIN: f32 = 28.0;
+const QUICK_SIZE: Size = Size::new(QUICK_CARD.width + 2.0 * QUICK_MARGIN, QUICK_CARD.height + 2.0 * QUICK_MARGIN);
+
+/// The popup window is see-through so the card can fade and lift as one piece.
+/// Set GOTODO_OPAQUE=1 on a setup whose renderer has no alpha channel.
+pub fn quick_transparent() -> bool {
+    static SEE_THROUGH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SEE_THROUGH.get_or_init(|| std::env::var_os("GOTODO_OPAQUE").is_none())
+}
 pub const SIDEBAR_MIN: f32 = 180.0;
 pub const SIDEBAR_MAX: f32 = 420.0;
 const LOG_DELAY: Duration = Duration::from_millis(1100);
@@ -296,6 +307,7 @@ fn quick_settings() -> window::Settings {
         max_size: Some(QUICK_SIZE),
         resizable: false,
         decorations: false,
+        transparent: quick_transparent(),
         level: window::Level::AlwaysOnTop,
         position: window::Position::Centered,
         platform_specific: platform("gotodo-quick"),
