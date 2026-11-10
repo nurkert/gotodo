@@ -5,6 +5,7 @@ use iced::widget::{
     Column, Row, button, center, column, container, hover, mouse_area, opaque, pin, row, scrollable, slider, space, stack,
     text, text_editor, text_input, toggler, tooltip,
 };
+use iced::alignment::{Horizontal, Vertical};
 use iced::{Alignment, Color, Element, Length, Padding, Point, mouse, window};
 
 use super::keys::{self, Cmd};
@@ -85,7 +86,7 @@ impl App {
         let p = self.palette();
         let body: El<'_> = match self.auth {
             Auth::Open => self.workspace(),
-            _ => center(self.auth_card(false)).into(),
+            _ => self.lock_screen(),
         };
         container(body)
             .width(Length::Fill)
@@ -98,8 +99,6 @@ impl App {
         let p = self.palette();
         let setup = matches!(self.auth, Auth::Setup);
         let heading = if setup { t("Create a password") } else { t("gotodo is locked") };
-        let enough = self.password.chars().count() >= MIN_PASSWORD_CHARS;
-
         let password = text_input(t("Password"), &self.password)
             .id(auth_id())
             .secure(true)
@@ -108,22 +107,6 @@ impl App {
             .padding(10)
             .size(14)
             .style(style::boxed_input(p));
-
-        let action = button(center(
-            text(if self.auth_busy {
-                t("Working…")
-            } else if setup {
-                t("Create vault")
-            } else {
-                t("Unlock")
-            })
-            .size(14)
-            .font(MEDIUM),
-        ))
-        .height(38)
-        .width(Length::Fill)
-        .on_press_maybe((!self.auth_busy && (enough || !setup)).then_some(Message::AuthSubmit))
-        .style(style::primary_button(p));
 
         let device_button = |primary: bool| -> El<'static> {
             let words = if self.auth_busy { t("Working…") } else { t("Unlock") };
@@ -150,101 +133,146 @@ impl App {
             return column![password, label(error, 12, color)].spacing(8).into();
         }
 
-        if setup && !self.setup_password {
-            let mut card = Column::new()
-                .spacing(14)
-                .width(360)
-                .push(icon(Icon::Lock, 26, p.accent))
-                .push(label(t("Welcome to gotodo"), 22, p.text).font(SEMIBOLD))
-                .push(
-                    label(
-                        t("Your to-dos stay on this computer, encrypted. The key is sealed to this machine, so there is no password to type."),
-                        13,
-                        p.muted,
-                    )
-                    .line_height(1.45),
-                )
-                .push(
-                    button(center(text(if self.auth_busy { t("Working…") } else { t("Get started") }).size(14).font(MEDIUM)))
-                        .height(38)
-                        .width(Length::Fill)
-                        .on_press_maybe((!self.auth_busy).then_some(Message::SetupDevice))
-                        .style(style::primary_button(p)),
-                )
-                .push(
-                    button(center(text(t("Use a password instead")).size(13).color(p.muted)))
-                        .height(34)
-                        .width(Length::Fill)
-                        .on_press(Message::SetupPassword(true))
-                        .style(style::quiet_button(p, false)),
-                );
-            if let Some(error) = &self.auth_error {
-                card = card.push(label(error.as_str(), 13, p.red));
-            }
-            return card.into();
-        }
+        // Only the Quick Entry popup reaches this; the window uses `lock_screen`.
+        column![password, label(heading, 12, p.muted)].spacing(8).into()
+    }
 
-        let device_only = !setup && !self.slots.password;
+    /// The full-window lock and welcome screen: one clear action, the other
+    /// ways in tucked into quiet links underneath.
+    fn lock_screen(&self) -> El<'_> {
+        let p = self.palette();
+        let setup = matches!(self.auth, Auth::Setup);
+        let device_first = !setup && self.slots.device && !self.unlock_password;
+
+        let centered = |content: iced::widget::Text<'static>| -> El<'static> {
+            container(content.align_x(Horizontal::Center)).center_x(Length::Fill).into()
+        };
+        let primary = |words: &'static str, busy_words: &'static str, ready: bool, message: Message| -> El<'static> {
+            button(center(text(if self.auth_busy { busy_words } else { words }).size(14).font(MEDIUM)))
+                .height(42)
+                .width(Length::Fill)
+                .on_press_maybe((ready && !self.auth_busy).then_some(message))
+                .style(style::primary_button(p))
+                .into()
+        };
+        let link = |words: &'static str, message: Option<Message>| -> El<'static> {
+            button(text(t(words)).size(12.5).color(if message.is_some() { p.muted } else { p.faint }))
+                .padding([4, 8])
+                .on_press_maybe(message)
+                .style(style::quiet_button(p, false))
+                .into()
+        };
+
+        let title = if setup {
+            if self.setup_password { t("Create a password") } else { t("Welcome to gotodo") }
+        } else {
+            t("gotodo is locked")
+        };
+        let subtitle = if setup && !self.setup_password {
+            t("Your to-dos stay on this computer, encrypted. The key is sealed to this machine, so there is no password to type.")
+        } else if setup {
+            t("Everything you add stays on this device, encrypted with this password. It cannot be recovered if you lose it.")
+        } else if device_first {
+            t("Your to-dos are encrypted on this device.")
+        } else {
+            t("Enter your password to continue.")
+        };
+
         let mut card = Column::new()
             .spacing(14)
-            .width(360)
-            .push(icon(Icon::Lock, 26, p.accent))
-            .push(label(if device_only { t("gotodo is locked") } else { heading }, 22, p.text).font(SEMIBOLD));
-        if setup {
-            card = card.push(
-                label(
-                    t("Everything you add stays on this device, encrypted with this password. It cannot be recovered if you lose it."),
-                    13,
-                    p.muted,
-                )
-                .line_height(1.45),
-            );
-        }
-        if device_only {
-            card = card.push(device_button(true));
+            .width(340)
+            .align_x(Alignment::Center)
+            .push(container(icon(Icon::Lock, 28, p.accent)).padding(18).style(style::mark(p)))
+            .push(space().height(2))
+            .push(centered(label(title, 23, p.text).font(SEMIBOLD)))
+            .push(centered(label(subtitle, 13, p.muted).line_height(1.45)))
+            .push(space().height(4));
+
+        if setup && !self.setup_password {
+            card = card.push(primary("Get started", "Setting up…", true, Message::SetupDevice));
+        } else if device_first {
+            card = card.push(primary("Unlock", "Unlocking…", true, Message::AuthDevice));
         } else {
-            card = card.push(password);
-        }
-        if setup {
+            let enough = self.password.chars().count() >= MIN_PASSWORD_CHARS;
             card = card.push(
-                text_input(t("Repeat password"), &self.repeat)
+                text_input(t("Password"), &self.password)
+                    .id(auth_id())
                     .secure(true)
-                    .on_input(Message::AuthRepeat)
+                    .on_input(Message::AuthPassword)
                     .on_submit(Message::AuthSubmit)
-                    .padding(10)
+                    .padding(11)
                     .size(14)
                     .style(style::boxed_input(p)),
             );
+            if setup {
+                card = card.push(
+                    text_input(t("Repeat password"), &self.repeat)
+                        .secure(true)
+                        .on_input(Message::AuthRepeat)
+                        .on_submit(Message::AuthSubmit)
+                        .padding(11)
+                        .size(14)
+                        .style(style::boxed_input(p)),
+                );
+                card = card.push(primary("Create vault", "Setting up…", enough, Message::AuthSubmit));
+            } else {
+                card = card.push(primary("Unlock", "Unlocking…", true, Message::AuthSubmit));
+            }
         }
-        if !device_only {
-            card = card.push(action);
-        }
-        if setup {
-            card = card.push(
-                button(center(text(t("Use the device key instead")).size(13).color(p.muted)))
-                    .height(34)
-                    .width(Length::Fill)
-                    .on_press(Message::SetupPassword(false))
-                    .style(style::quiet_button(p, false)),
-            );
-        } else if self.slots.device && self.slots.password {
-            card = card.push(device_button(false));
-        }
-        if let Auth::Locked { has_keepass: true } = self.auth {
-            let ready = self.keepass == keepass::Status::Unlocked;
-            card = card.push(
-                button(center(text(t("Unlock with KeePassXC")).size(14).font(MEDIUM).color(if ready { p.text } else { p.faint })))
-                    .height(38)
-                    .width(Length::Fill)
-                    .on_press_maybe((ready && !self.auth_busy).then_some(Message::AuthKeePass))
-                    .style(style::quiet_button(p, false)),
-            );
-            card = card.push(label(keepass_status_text(self.keepass), 12, p.muted));
-        }
+
         if let Some(error) = &self.auth_error {
-            card = card.push(label(error.as_str(), 13, p.red));
+            card = card.push(
+                row![icon(Icon::Flag, 13, p.red), label(error.as_str(), 12.5, p.red)]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+            );
         }
-        card.into()
+
+        // Other ways in, only the ones that exist, only as quiet text.
+        let mut others = Row::new().spacing(2).align_y(Alignment::Center);
+        let mut any = false;
+        if setup {
+            others = others.push(link(
+                if self.setup_password { "Use the device key instead" } else { "Use a password instead" },
+                Some(Message::SetupPassword(!self.setup_password)),
+            ));
+            any = true;
+        } else {
+            if self.slots.password && device_first {
+                others = others.push(link("Use password", Some(Message::UnlockMode(true))));
+                any = true;
+            }
+            if self.slots.device && !device_first {
+                others = others.push(link("Use this device", Some(Message::UnlockMode(false))));
+                any = true;
+            }
+            if let Auth::Locked { has_keepass: true } = self.auth {
+                let ready = self.keepass == keepass::Status::Unlocked;
+                others = others.push(if ready {
+                    link("Use KeePassXC", Some(Message::AuthKeePass))
+                } else {
+                    link("KeePassXC is locked", None)
+                });
+                any = true;
+            }
+        }
+        if any {
+            card = card.push(space().height(2)).push(container(others).center_x(Length::Fill));
+        }
+
+        let v = self.view_anim.value.clamp(0.0, 1.0);
+        let shown = reveal(card).fade(1.0 - v, p.page).slide((1.0 - v) * 10.0);
+        let footer = container(
+            row![icon(Icon::Lock, 12, p.faint), label(t("Encrypted on this device"), 11.5, p.faint)]
+                .spacing(6)
+                .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Bottom)
+        .padding(20);
+        stack![center(shown), footer].into()
     }
 
     fn workspace(&self) -> El<'_> {

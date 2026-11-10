@@ -78,6 +78,7 @@ pub enum Message {
     AuthDevice,
     SetupDevice,
     SetupPassword(bool),
+    UnlockMode(bool),
     DeviceEnable,
     DeviceDisable,
     AuthDone(Slot<Result<Session, String>>),
@@ -211,6 +212,8 @@ pub struct App {
     /// Days the strip still has to slide to reach its new first day.
     pub quick_cal_slide: Spring,
     pub setup_password: bool,
+    /// On the lock screen: show the password field instead of the device button.
+    pub unlock_password: bool,
 
     pub view: View,
     pub tag_filter: Option<Id>,
@@ -348,6 +351,7 @@ impl App {
             quick_cal: None,
             quick_cal_slide: Spring::at(0.0),
             setup_password: false,
+            unlock_password: false,
             view: View::Today,
             tag_filter: None,
             sections: Vec::new(),
@@ -388,6 +392,8 @@ impl App {
         let needs_setup = matches!(app.auth, Auth::Setup);
         let open = if start_quick && !needs_setup { app.open_quick() } else { app.open_main() };
         let theme = iced::system::theme().map(|mode| Message::SystemDark(mode == iced::theme::Mode::Dark));
+        app.view_anim = Spring::at(0.0);
+        app.view_anim.to(1.0);
         let device = if matches!(app.auth, Auth::Locked { .. }) && app.slots.device {
             app.unlock_with_device()
         } else {
@@ -725,6 +731,9 @@ impl App {
 
     fn lock(&mut self) {
         self.refresh_slots();
+        self.unlock_password = false;
+        self.view_anim = Spring::at(0.0);
+        self.view_anim.to(1.0);
         let has_keepass = self.slots.keepass;
         if let Some(session) = self.session.take() {
             session.close();
@@ -1219,6 +1228,14 @@ impl App {
         if !matches!(self.auth, Auth::Open) {
             if matches!(press.key.as_ref(), Key::Named(Named::Tab)) {
                 return operation::focus_next();
+            }
+            // With the device button as the main action, Enter presses it.
+            if matches!(press.key.as_ref(), Key::Named(Named::Enter))
+                && matches!(self.auth, Auth::Locked { .. })
+                && self.slots.device
+                && !self.unlock_password
+            {
+                return self.unlock_with_device();
             }
             return IcedTask::none();
         }
@@ -1759,7 +1776,9 @@ impl App {
             Message::AuthSubmit => {
                 return match self.auth {
                     Auth::Setup => self.create_vault(),
-                    Auth::Locked { .. } if !self.slots.password => self.unlock_with_device(),
+                    Auth::Locked { .. } if !self.slots.password || (self.slots.device && !self.unlock_password) => {
+                        self.unlock_with_device()
+                    }
                     Auth::Locked { .. } => self.unlock_with_password(),
                     Auth::Open => IcedTask::none(),
                 };
@@ -1767,6 +1786,11 @@ impl App {
             Message::AuthKeePass => return self.unlock_with_keepass(),
             Message::AuthDevice => return self.unlock_with_device(),
             Message::SetupDevice => return self.create_device_vault(),
+            Message::UnlockMode(password) => {
+                self.unlock_password = password;
+                self.auth_error = None;
+                return if password { operation::focus(auth_id()) } else { IcedTask::none() };
+            }
             Message::SetupPassword(on) => {
                 self.setup_password = on;
                 self.auth_error = None;

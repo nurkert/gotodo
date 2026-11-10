@@ -113,6 +113,15 @@ pub fn open_row(p: Palette) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+/// The soft tinted tile behind the lock icon.
+pub fn mark(p: Palette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Color { a: if p.dark { 0.16 } else { 0.11 }, ..p.accent }.into()),
+        border: Border { radius: 22.0.into(), ..Border::default() },
+        ..container::Style::default()
+    }
+}
+
 /// The Quick Entry card. `a` fades the whole card, shadow included.
 /// No border, radius or shadow of our own: the compositor frames the window.
 pub fn quick_card(p: Palette, a: f32) -> impl Fn(&Theme) -> container::Style {
