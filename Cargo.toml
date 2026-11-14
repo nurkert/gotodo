@@ -1,6 +1,6 @@
 [package]
 name = "gotodo"
-version = "0.0.10"
+version = "0.0.11"
 edition = "2024"
 description = "A calm, encrypted, keyboard-first to-do manager for Linux"
 license = "GPL-3.0-or-later"

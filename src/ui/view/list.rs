@@ -53,7 +53,7 @@ impl App {
 
         let t_value = self.view_anim.value;
         let centered = container(page).center_x(Length::Fill);
-        let animated = reveal(centered).fade(1.0 - t_value, p.page).slide((1.0 - t_value) * 12.0);
+        let animated = reveal(centered).fade(1.0 - t_value, self.page_bg()).slide((1.0 - t_value) * 12.0);
         let mut column = Column::new().push(quiet_scroll(animated, p).height(Length::Fill));
         if let Some(error) = self.save_error() {
             column = column.push(container(label(format!("{}: {error}", t("Could not save")), size::SM, p.red)).padding([6, 16]));
@@ -283,7 +283,7 @@ impl App {
             .on_right_press(Message::RowMenu(id))
             .on_enter(Message::RowHover(id))
             .on_exit(Message::RowLeave(id));
-        reveal(area).progress(anim.appear.value).fade(1.0 - anim.appear.value.min(1.0), p.page).into()
+        reveal(area).progress(anim.appear.value).fade(1.0 - anim.appear.value.min(1.0), self.page_bg()).into()
     }
 
     pub(super) fn row_badges<'a>(&'a self, lib: &'a Library, task: &'a Task) -> El<'a> {

@@ -12,7 +12,7 @@ Download the `.deb` for your architecture from the
 [releases page](https://github.com/nurkert/gotodo/releases), then:
 
 ```sh
-sudo apt install ./gotodo_0.0.10_amd64.deb
+sudo apt install ./gotodo_0.0.11_amd64.deb
 ```
 
 ## Quick Entry and Sway
@@ -26,9 +26,14 @@ exec gotodo --background
 bindsym $mod+Shift+t exec gotodo quick
 ```
 
-Without `--background`, gotodo exits when its last window closes, and the next
-`gotodo quick` starts it again from scratch. `gotodo` alone opens the main
-window of the running instance.
+Closing the last window keeps gotodo running, unlocked until auto-lock, so
+Quick Entry opens at once and needs no new unlock. Turn off "Keep running when
+the window closes" in Settings to have it exit instead. `gotodo` alone opens
+the main window of the running instance.
+
+While gotodo is locked, Quick Entry still takes to-dos. They wait in memory
+only, never on disk, and are added on the next unlock; "Unlock now" in the
+popup unlocks right away. "Quick Entry while locked" in Settings turns this off.
 
 No `for_window` rule is needed: the popup has a fixed size, so Sway floats and
 centers it instead of tiling it. It closes on Esc or on its shortcut, never just
@@ -73,6 +78,19 @@ saves, Shift+Enter saves and stays open for the next one, Esc closes.
 | `^when` | deadline | `^24.12.`, `^next-week` |
 
 Use `-` for spaces inside a token.
+
+## Colors and transparency
+
+Settings, Look, Colors offers gotodo's own palette with a choice of accent
+color, only the accent of your GTK theme, or the whole GTK theme. GTK colors
+come from the `@define-color` lines in `~/.config/gtk-4.0/gtk.css` and
+`~/.config/gtk-3.0/gtk.css` (libadwaita and classic names, `alpha()`,
+`shade()` and `mix()` included), with the GNOME accent setting as fallback.
+Text colors are adjusted until they stay readable on the theme's backgrounds.
+
+Under Transparency, the content, the sidebar and Quick Entry each have an
+opacity. On SwayFX with `blur enable`, the desktop shows through blurred.
+Set `GOTODO_OPAQUE=1` if your renderer has no alpha channel.
 
 ## Shortcuts
 
@@ -170,7 +188,7 @@ Pushing a tag that matches the version in `Cargo.toml` builds, tests and
 publishes `amd64` and `arm64` packages:
 
 ```sh
-git tag v0.0.10 && git push origin v0.0.10
+git tag v0.0.11 && git push origin v0.0.11
 ```
 
 Inter is licensed under the SIL Open Font License, see `assets/fonts/OFL.txt`.

@@ -2,6 +2,7 @@
 
 mod actions;
 mod auth;
+mod gtk;
 mod input;
 mod keys;
 mod motion;
@@ -55,7 +56,8 @@ pub const QUICK_CARD: Size = Size::new(580.0, 112.0);
 /// shadow, rounded corners) wrap the popup and nothing else.
 const QUICK_SIZE: Size = QUICK_CARD;
 
-/// The popup window is see-through so the card can fade and lift as one piece.
+/// Windows are see-through so the Quick Entry card can fade in and the
+/// background opacity settings can show a blurred desktop behind them.
 /// Set GOTODO_OPAQUE=1 on a setup whose renderer has no alpha channel.
 pub fn quick_transparent() -> bool {
     static SEE_THROUGH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -72,6 +74,7 @@ pub enum Message {
     Opened(window::Id),
     Closed(window::Id),
     Resized(window::Id, Size),
+    QuickUnlock,
     Ipc(ipc::Command),
     Frame(Instant),
     Tick,
@@ -176,6 +179,13 @@ pub enum SettingChange {
     QuickToday(bool),
     DeadlineAlert(u32),
     LockNeedsSecret(bool),
+    Colors(crate::prefs::ColorSource),
+    Accent(crate::prefs::Accent),
+    PageOpacity(f32),
+    SidebarOpacity(f32),
+    QuickOpacity(f32),
+    KeepRunning(bool),
+    QuickWhileLocked(bool),
 }
 
 /// How the current unlock attempt opens the vault.
@@ -244,6 +254,8 @@ pub struct App {
     pub auth: Auth,
     pub session: Option<Session>,
     pub system_dark: bool,
+    /// Colors from the GTK theme, read at start and when the setting is chosen.
+    gtk: Option<gtk::GtkColors>,
     /// Look and lock behaviour, readable while the vault is closed.
     pub prefs: Prefs,
     /// Startup with an automatic way in: show a quiet page instead of the lock
@@ -306,6 +318,10 @@ pub struct App {
     pub main_size: Size,
 
     pub quick_text: String,
+    /// Quick Entry text typed while locked, added on the next unlock.
+    pub pending_quick: Vec<Zeroizing<String>>,
+    /// The locked Quick Entry shows the unlock card instead of the input.
+    quick_unlock: bool,
     pub modifiers: Modifiers,
 
     pub password_old: String,
@@ -378,6 +394,7 @@ fn main_settings() -> window::Settings {
     window::Settings {
         size: Size::new(980.0, 680.0),
         min_size: Some(Size::new(560.0, 380.0)),
+        transparent: quick_transparent(),
         platform_specific: platform("gotodo"),
         ..window::Settings::default()
     }
@@ -385,7 +402,7 @@ fn main_settings() -> window::Settings {
 
 /// Fixed-size and undecorated. Sway and i3 float a toplevel whose minimum and
 /// maximum size match, so this opens as a small centered popup instead of
-/// being tiled. It stays opaque because software rendering has no alpha.
+/// being tiled.
 fn quick_settings() -> window::Settings {
     window::Settings {
         size: QUICK_SIZE,
@@ -416,6 +433,7 @@ impl App {
             auth,
             session: None,
             system_dark: false,
+            gtk: if prefs.colors == crate::prefs::ColorSource::Gotodo { None } else { gtk::GtkColors::load() },
             prefs,
             booting,
             boot_started: Instant::now(),
@@ -464,6 +482,8 @@ impl App {
             cursor: Point::ORIGIN,
             main_size: Size::new(980.0, 680.0),
             quick_text: String::new(),
+            pending_quick: Vec::new(),
+            quick_unlock: false,
             modifiers: Modifiers::default(),
             password_old: String::new(),
             password_new: String::new(),
@@ -513,7 +533,34 @@ impl App {
             A::Dark => true,
             A::Auto => self.system_dark,
         };
-        if dark { DARK } else { LIGHT }
+        use crate::prefs::ColorSource;
+        let base = if dark { DARK } else { LIGHT };
+        match (self.prefs.colors, &self.gtk) {
+            (ColorSource::Gtk, Some(gtk)) => gtk.palette(dark),
+            (ColorSource::GtkAccent, Some(gtk::GtkColors { accent: Some(accent), .. })) => style::with_accent(base, *accent),
+            _ => style::with_accent(base, style::accent_color(self.prefs.accent, dark)),
+        }
+    }
+
+    /// The main window's background with the chosen opacity.
+    pub fn page_bg(&self) -> iced::Color {
+        let p = self.palette();
+        if !quick_transparent() {
+            return p.page;
+        }
+        iced::Color { a: self.prefs.page_opacity.clamp(crate::prefs::MIN_OPACITY, 1.0), ..p.page }
+    }
+
+    pub fn sidebar_bg(&self) -> iced::Color {
+        let p = self.palette();
+        if !quick_transparent() {
+            return p.sidebar;
+        }
+        iced::Color { a: self.prefs.sidebar_opacity.clamp(crate::prefs::MIN_OPACITY, 1.0), ..p.sidebar }
+    }
+
+    pub fn quick_opacity(&self) -> f32 {
+        if quick_transparent() { self.prefs.quick_opacity.clamp(crate::prefs::MIN_OPACITY, 1.0) } else { 1.0 }
     }
 
     pub fn theme(&self, _: window::Id) -> Theme {
@@ -626,7 +673,7 @@ impl App {
             message @ (Message::Title(..) | Message::TitleDone | Message::Notes(..) | Message::ProjectNotes(..) | Message::ChecklistInput(..) | Message::ChecklistAdd | Message::ChecklistToggle(..) | Message::ChecklistEdit(..) | Message::ChecklistRemove(..) | Message::Toggle(..) | Message::HeadingRename(..) | Message::HeadingArchive(..) | Message::HeadingDelete(..) | Message::Notified(..) | Message::NotificationAction(..) | Message::ToastUndo) => return self.update_edit(message),
             Message::Opened(id) => {
                 if Some(id) == self.quick {
-                    return if matches!(self.auth, Auth::Open) {
+                    return if matches!(self.auth, Auth::Open) || self.quick_queues() {
                         operation::focus(quick_id())
                     } else {
                         operation::focus(auth_id())
@@ -645,7 +692,9 @@ impl App {
                 if Some(id) == self.main {
                     self.main = None;
                 }
-                if self.main.is_none() && self.quick.is_none() && !self.background {
+                // To-dos waiting for an unlock live only in this process, so it stays.
+                let stay = self.background || self.prefs.keep_running || !self.pending_quick.is_empty();
+                if self.main.is_none() && self.quick.is_none() && !stay {
                     if let Some(session) = self.session.take() {
                         session.close();
                     }
@@ -660,6 +709,10 @@ impl App {
                 return self.open_quick();
             }
             Message::Ipc(ipc::Command::QuickEntry) => {}
+            Message::QuickUnlock => {
+                self.quick_unlock = true;
+                return operation::focus(auth_id());
+            }
             Message::Ipc(ipc::Command::Show) => {
                 return match self.main {
                     Some(id) => window::gain_focus(id),

@@ -402,6 +402,19 @@ pub fn bare_editor(p: Palette) -> impl Fn(&Theme, text_editor::Status) -> text_e
     }
 }
 
+/// A round color choice; the chosen one gets a ring in the text color.
+pub fn swatch(p: Palette, tint: Color, active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| button::Style {
+        background: Some(tint.into()),
+        border: Border {
+            radius: radius::FULL.into(),
+            width: if active { 2.0 } else if matches!(status, button::Status::Hovered) { 1.0 } else { 0.0 },
+            color: if active { p.text } else { p.muted },
+        },
+        ..button::Style::default()
+    }
+}
+
 /// Base theme, so stock widgets such as sliders and togglers share the accent.
 pub fn base_theme(p: &Palette) -> Theme {
     static THEMES: OnceLock<(Theme, Theme)> = OnceLock::new();
@@ -419,7 +432,44 @@ pub fn base_theme(p: &Palette) -> Theme {
         )
     };
     let (light, dark) = THEMES.get_or_init(|| (make("gotodo light", &LIGHT), make("gotodo dark", &DARK)));
-    if p.dark { dark.clone() } else { light.clone() }
+    match p {
+        p if *p == LIGHT => light.clone(),
+        p if *p == DARK => dark.clone(),
+        p => make("gotodo custom", p),
+    }
+}
+
+/// The highlight colors offered in Settings, tuned for light and dark pages.
+pub fn accent_color(accent: crate::prefs::Accent, dark: bool) -> Color {
+    use crate::prefs::Accent as A;
+    let (light, dark_tone) = match accent {
+        A::Blue => (LIGHT.accent, DARK.accent),
+        A::Purple => (color!(0x8a4fd1), color!(0xb07cf2)),
+        A::Pink => (color!(0xc7407f), color!(0xec6fa8)),
+        A::Red => (color!(0xd1364b), color!(0xf0627a)),
+        A::Orange => (color!(0xc8590e), color!(0xf28c3c)),
+        A::Green => (color!(0x2f8a4e), color!(0x5cc282)),
+        A::Teal => (color!(0x1d8a8a), color!(0x45c0bd)),
+        A::Graphite => (color!(0x5b6170), color!(0x9aa1b0)),
+    };
+    if dark { dark_tone } else { light }
+}
+
+/// `p` with another highlight color; the selection tint follows it.
+pub fn with_accent(p: Palette, accent: Color) -> Palette {
+    if accent == p.accent {
+        return p;
+    }
+    let accent = Color { a: 1.0, ..accent };
+    let k = if p.dark { 0.32 } else { 0.18 };
+    let mix = |a: f32, b: f32| a + (b - a) * k;
+    let on_accent = if contrast(Color::WHITE, accent) >= contrast(Color::BLACK, accent) { Color::WHITE } else { Color::BLACK };
+    Palette {
+        accent,
+        on_accent,
+        selected: Color { r: mix(p.page.r, accent.r), g: mix(p.page.g, accent.g), b: mix(p.page.b, accent.b), a: 1.0 },
+        ..p
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

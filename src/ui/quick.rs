@@ -11,6 +11,7 @@ impl App {
         self.quick = Some(id);
         self.quick_text.clear();
         self.quick_cal = None;
+        self.quick_unlock = false;
         self.quick_anim = Spring::quick(0.0);
         self.quick_anim.to(1.0);
         open.map(Message::Opened)
@@ -71,15 +72,36 @@ impl App {
         }
     }
 
+    /// Locked, with Quick Entry set to take to-dos for later.
+    pub(super) fn quick_queues(&self) -> bool {
+        !matches!(self.auth, Auth::Open | Auth::Setup) && self.prefs.quick_while_locked && !self.quick_unlock
+    }
+
     pub(super) fn submit_quick(&mut self) -> Task2 {
-        let today = self.today;
         let keep_open = self.modifiers.shift();
+        if self.quick_queues() {
+            let text = std::mem::take(&mut self.quick_text);
+            if text.trim().is_empty() {
+                return IcedTask::none();
+            }
+            self.pending_quick.push(Zeroizing::new(text));
+            return if keep_open { operation::focus(quick_id()) } else { self.close_quick() };
+        }
         let text = std::mem::take(&mut self.quick_text);
-        let Some(session) = &mut self.session else { return IcedTask::none() };
-        let draft = parse::parse_draft(&text, &session.lib, today);
-        if draft.title.is_empty() {
+        if !self.add_quick_text(&text) {
             self.quick_text = text;
             return IcedTask::none();
+        }
+        if keep_open { operation::focus(quick_id()) } else { self.close_quick() }
+    }
+
+    /// Adds the to-do described by Quick Entry text. False when it has no title.
+    pub(super) fn add_quick_text(&mut self, text: &str) -> bool {
+        let today = self.today;
+        let Some(session) = &mut self.session else { return false };
+        let draft = parse::parse_draft(text, &session.lib, today);
+        if draft.title.is_empty() {
+            return false;
         }
         session.edit(|lib| {
             let fallback = if lib.settings.quick_entry_to_today { Schedule::On(today) } else { Schedule::Inbox };
@@ -101,7 +123,19 @@ impl App {
             }
         });
         self.refresh(true);
-        if keep_open { operation::focus(quick_id()) } else { self.close_quick() }
+        true
+    }
+
+    /// Adds what Quick Entry took while gotodo was locked.
+    pub(super) fn add_pending_quick(&mut self) {
+        let pending = std::mem::take(&mut self.pending_quick);
+        let mut added = 0;
+        for text in &pending {
+            if self.add_quick_text(text) {
+                added += 1;
+            }
+        }
+        self.say(added, "Added 1 to-do from Quick Entry", "to-dos from Quick Entry added");
     }
 
     /// Messages about the Quick Entry popup.

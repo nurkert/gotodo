@@ -332,6 +332,81 @@ fn locking_can_pause_the_device_key_until_a_password_unlock() {
 }
 
 #[test]
+fn quick_entry_while_locked_waits_for_the_unlock() {
+    let mut f = fixture();
+    lock(&mut f, vault::Slots { password: true, keepass: false, device: false });
+    let popup = window::Id::unique();
+    f.app.quick = Some(popup);
+    assert!(f.app.quick_queues());
+    let _ = f.app.update(Message::QuickInput("Rechnung schreiben #HausUmbau".into()));
+    let _ = f.app.update(Message::QuickSubmit);
+    let _ = f.app.update(Message::QuickInput("   ".into()));
+    let _ = f.app.update(Message::QuickSubmit);
+    assert_eq!(f.app.pending_quick.len(), 1, "blank entries are not kept");
+    assert!(f.app.lib().is_none());
+
+    let _ = f.app.update(Message::Closed(popup));
+    assert!(f.app.pending_quick.len() == 1, "waiting to-dos survive closing the popup");
+
+    let (lib, project) = sample_library(f.app.today());
+    let session = Session::for_tests(lib, &f._dir.path().join("again.gotodo"));
+    let _ = f.app.finish_unlock(session);
+    assert!(f.app.pending_quick.is_empty());
+    let id = titled(&f.app, "Rechnung schreiben");
+    assert_eq!(f.app.lib().unwrap().task(id).unwrap().project, Some(project), "tokens are read at unlock");
+    assert!(f.app.toast.is_some());
+}
+
+#[test]
+fn quick_entry_while_locked_can_be_turned_off() {
+    let mut f = fixture();
+    lock(&mut f, vault::Slots { password: true, keepass: false, device: false });
+    f.app.quick = Some(window::Id::unique());
+    let _ = f.app.update(Message::Setting(SettingChange::QuickWhileLocked(false)));
+    assert!(!f.app.quick_queues());
+    f.app.prefs.quick_while_locked = true;
+    let _ = f.app.update(Message::QuickUnlock);
+    assert!(!f.app.quick_queues(), "Unlock now shows the unlock card");
+}
+
+#[test]
+fn closing_the_window_keeps_gotodo_running() {
+    let mut f = fixture();
+    let window = f.window;
+    let _ = f.app.update(Message::Closed(window));
+    assert!(f.app.session.is_some(), "still unlocked for Quick Entry");
+    let mut f = fixture();
+    f.app.prefs.keep_running = false;
+    let window = f.window;
+    let _ = f.app.update(Message::Closed(window));
+    assert!(f.app.session.is_none(), "without the setting the vault closes with the window");
+}
+
+#[test]
+fn gtk_colors_and_opacity_render() {
+    let mut f = fixture();
+    f.app.gtk = Some(super::gtk::GtkColors::from_css(
+        "@define-color accent_bg_color #b162d5; @define-color window_bg_color #15151a; \
+         @define-color window_fg_color #e8e8ed; @define-color base_color #1c1c24; @define-color borders #34343d;",
+    ));
+    f.app.prefs.colors = crate::prefs::ColorSource::Gtk;
+    f.app.prefs.page_opacity = 0.7;
+    f.app.prefs.sidebar_opacity = 0.5;
+    assert!(f.app.palette().dark);
+    assert!((f.app.page_bg().a - 0.7).abs() < 1e-6);
+    let window = f.window;
+    snapshot(&f.app, window, "gtk-theme", MAIN);
+    run(&mut f.app, Cmd::Settings);
+    settle(&mut f.app);
+    snapshot(&f.app, window, "gtk-theme-settings", MAIN);
+    f.app.prefs.colors = crate::prefs::ColorSource::GtkAccent;
+    assert_eq!(f.app.palette().accent, iced::color!(0xb162d5));
+    f.app.prefs.colors = crate::prefs::ColorSource::Gotodo;
+    f.app.prefs.accent = crate::prefs::Accent::Green;
+    assert_ne!(f.app.palette().accent, style::LIGHT.accent);
+}
+
+#[test]
 fn completing_offers_undo() {
     let mut f = fixture();
     let id = titled(&f.app, "Laufen gehen");
@@ -512,12 +587,17 @@ fn every_lock_state_renders() {
         f.app.quick = Some(popup);
         f.app.auth = Auth::Locked { has_keepass: false };
         f.app.slots = password_only;
+        f.app.quick_text = "Angebot prüfen #arbeit !morgen".into();
+        snapshot(&f.app, popup, &format!("{tag}-quick-queued"), QUICK_SIZE);
+        f.app.quick_text.clear();
+        f.app.quick_unlock = true;
         snapshot(&f.app, popup, &format!("{tag}-quick-locked"), QUICK_SIZE);
         f.app.auth_error = Some("Wrong password".into());
         snapshot(&f.app, popup, &format!("{tag}-quick-locked-error"), QUICK_SIZE);
         f.app.auth_error = None;
         f.app.slots = device_only;
         snapshot(&f.app, popup, &format!("{tag}-quick-locked-device"), QUICK_SIZE);
+        f.app.quick_unlock = false;
         f.app.quick = None;
     }
 }

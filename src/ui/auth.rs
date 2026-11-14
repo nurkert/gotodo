@@ -74,6 +74,8 @@ impl App {
         self.last_activity = Instant::now();
         self.run_daily();
         self.refresh(false);
+        self.add_pending_quick();
+        self.quick_unlock = false;
         self.view_anim = Spring::at(0.0);
         self.view_anim.to(1.0);
         if self.quick.is_some() { operation::focus(quick_id()) } else { IcedTask::none() }

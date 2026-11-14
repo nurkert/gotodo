@@ -89,15 +89,16 @@ impl App {
         if Some(window_id) == self.quick {
             return self.quick_view();
         }
-        let p = self.palette();
-        let body: El<'_> = match self.auth {
-            Auth::Open => self.workspace(),
-            _ => self.lock_screen(),
+        // The workspace paints sidebar and content separately, so each can
+        // have its own opacity; the lock screen is one surface.
+        let (body, background): (El<'_>, iced::Color) = match self.auth {
+            Auth::Open => (self.workspace(), iced::Color::TRANSPARENT),
+            _ => (self.lock_screen(), self.page_bg()),
         };
         container(body)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(style::panel(p.page))
+            .style(style::panel(background))
             .into()
     }
 
@@ -116,9 +117,8 @@ impl App {
             divider.into()
         };
         let split = row![
-            container(self.sidebar()).width(self.sidebar_width()).height(Length::Fill).style(style::panel(p.sidebar)),
-            divider,
-            self.main_pane(),
+            container(self.sidebar()).width(self.sidebar_width()).height(Length::Fill).style(style::panel(self.sidebar_bg())),
+            container(row![divider, self.main_pane()]).width(Length::Fill).height(Length::Fill).style(style::panel(self.page_bg())),
         ];
         let mut layers = stack![split];
         if self.sheet.is_some() {

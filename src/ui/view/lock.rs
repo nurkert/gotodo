@@ -236,7 +236,7 @@ impl App {
         }
 
         let v = self.view_anim.value.clamp(0.0, 1.0);
-        let shown = reveal(container(card).center_x(Length::Fill)).fade(1.0 - v, p.page).slide((1.0 - v) * 10.0);
+        let shown = reveal(container(card).center_x(Length::Fill)).fade(1.0 - v, self.page_bg()).slide((1.0 - v) * 10.0);
         let footer = container(
             row![icon(Icon::Lock, 12, p.faint), label(t("Encrypted on this device"), size::SM, p.faint)]
                 .spacing(6)

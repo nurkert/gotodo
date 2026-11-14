@@ -320,16 +320,73 @@ impl App {
             button(text(t(words)).size(size::MD)).padding([6, 12]).on_press(message).style(style::secondary_button(p)).into()
         };
 
-        let general = settings_group(
+        use crate::prefs::{Accent, ColorSource};
+        let colors = segmented(
             vec![
-                setting_row("Appearance", None, appearance, p),
-                setting_row("Text size", None, scale.into(), p),
-                setting_row("Reduce motion", None, switch(look.reduce_motion, SettingChange::ReduceMotion), p),
+                ("gotodo", look.colors == ColorSource::Gotodo, set(SettingChange::Colors(ColorSource::Gotodo))),
+                (t("GTK accent"), look.colors == ColorSource::GtkAccent, set(SettingChange::Colors(ColorSource::GtkAccent))),
+                (t("GTK theme"), look.colors == ColorSource::Gtk, set(SettingChange::Colors(ColorSource::Gtk))),
+            ],
+            p,
+        );
+        let colors_hint = match look.colors {
+            ColorSource::Gotodo => None,
+            _ if self.gtk.is_none() => Some(t("No GTK colors found, so gotodo's own are used.")),
+            ColorSource::GtkAccent => Some(t("The highlight color of your GTK theme.")),
+            ColorSource::Gtk => Some(t("Background, text and highlight from your GTK theme.")),
+        };
+        let mut swatches = Row::new().spacing(8).align_y(Alignment::Center);
+        for accent in Accent::ALL {
+            let tint = style::accent_color(accent, p.dark);
+            swatches = swatches.push(
+                button(space().width(18).height(18))
+                    .padding(0)
+                    .on_press(set(SettingChange::Accent(accent)))
+                    .style(style::swatch(p, tint, look.accent == accent)),
+            );
+        }
+        let opacity = |value: f32, change: fn(f32) -> SettingChange| -> El<'static> {
+            row![
+                slider(crate::prefs::MIN_OPACITY..=1.0, value, move |v| Message::Setting(change(v))).step(0.05_f32).width(160),
+                container(label(format!("{:.0} %", value * 100.0), size::SM, p.muted)).width(44).align_x(Horizontal::Right),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into()
+        };
+
+        let mut look_rows = vec![
+            setting_row("Appearance", None, appearance, p),
+            setting_row("Colors", colors_hint, colors, p),
+        ];
+        if look.colors == ColorSource::Gotodo {
+            look_rows.push(setting_row("Accent color", None, swatches.into(), p));
+        }
+        look_rows.push(setting_row("Text size", None, scale.into(), p));
+        look_rows.push(setting_row("Reduce motion", None, switch(look.reduce_motion, SettingChange::ReduceMotion), p));
+        let general = settings_group(look_rows, p);
+        let see_through = settings_group(
+            vec![
+                setting_row("Content", None, opacity(look.page_opacity, SettingChange::PageOpacity), p),
+                setting_row("Sidebar", None, opacity(look.sidebar_opacity, SettingChange::SidebarOpacity), p),
+                setting_row("Quick Entry", None, opacity(look.quick_opacity, SettingChange::QuickOpacity), p),
             ],
             p,
         );
         let lists = settings_group(
             vec![
+                setting_row(
+                    "Keep running when the window closes",
+                    Some(t("Quick Entry then opens at once, unlocked until auto-lock.")),
+                    switch(look.keep_running, SettingChange::KeepRunning),
+                    p,
+                ),
+                setting_row(
+                    "Quick Entry while locked",
+                    Some(t("Takes to-dos without unlocking. They wait in memory, never on disk, until the next unlock.")),
+                    switch(look.quick_while_locked, SettingChange::QuickWhileLocked),
+                    p,
+                ),
                 setting_row("Move completed to the Logbook", None, logging, p),
                 setting_row("Group Today by project", None, switch(s.group_today_by_parent, SettingChange::GroupToday), p),
                 setting_row("Quick Entry adds to Today", Some(t("Otherwise new to-dos land in the Inbox.")), switch(s.quick_entry_to_today, SettingChange::QuickToday), p),
@@ -451,8 +508,11 @@ impl App {
             );
         }
         body = body
-            .push(section_label(t("General"), p))
+            .push(section_label(t("Look"), p))
             .push(general)
+            .push(section_label(t("Transparency"), p))
+            .push(label(t("Below 100 % the desktop shows through, blurred where the compositor supports it (SwayFX, KWin, Hyprland)."), size::SM, p.muted))
+            .push(see_through)
             .push(section_label(t("Lists"), p))
             .push(lists)
             .push(section_label(t("Security"), p))

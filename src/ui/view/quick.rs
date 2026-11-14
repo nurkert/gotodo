@@ -13,7 +13,8 @@ impl App {
         let input_a = ((k - 0.12) / 0.55).clamp(0.0, 1.0);
         let meta_a = ((k - 0.30) / 0.60).clamp(0.0, 1.0);
 
-        let content: El<'_> = if !matches!(self.auth, Auth::Open) {
+        let queues = self.quick_queues();
+        let content: El<'_> = if !matches!(self.auth, Auth::Open) && !queues {
             self.quick_lock_card()
         } else {
             let input = text_input(t("New to-do"), &self.quick_text)
@@ -27,7 +28,8 @@ impl App {
             let meta: El<'_> = if meta_a < 0.03 {
                 space().height(if self.quick_cal.is_some() { 40 } else { 28 }).into()
             } else {
-                reveal(self.quick_meta()).fade(1.0 - meta_a, p.raised).slide((1.0 - meta_a) * 4.0).into()
+                let details = if queues { self.quick_queue_note() } else { self.quick_meta() };
+                reveal(details).fade(1.0 - meta_a, iced::Color { a: self.quick_opacity(), ..p.raised }).slide((1.0 - meta_a) * 4.0).into()
             };
             column![
                 // Icons cannot fade, so the plus switches on and off mid-way instead.
@@ -47,8 +49,29 @@ impl App {
             .padding([0, 18])
             .width(Length::Fill)
             .center_y(Length::Fill)
-            .style(style::quick_card(p, card_a))
+            .style(style::quick_card(p, card_a * self.quick_opacity()))
             .into()
+    }
+
+    /// Under the input while locked: where the to-do goes, and a way to unlock now.
+    fn quick_queue_note(&self) -> El<'_> {
+        let p = self.palette();
+        let waiting = self.pending_quick.len();
+        let note = if waiting == 0 {
+            t("Locked. Added when you next unlock gotodo.").to_owned()
+        } else {
+            format!("{} {waiting} {}", t("Locked. Added when you next unlock gotodo."), t("waiting."))
+        };
+        row![
+            icon(Icon::Lock, 13, p.muted),
+            label(note, size::SM, p.muted),
+            space().width(Length::Fill),
+            button(label(t("Unlock now"), size::SM, p.accent)).padding([2, 6]).on_press(Message::QuickUnlock).style(style::quiet_button(p, false)),
+        ]
+        .spacing(7)
+        .align_y(Alignment::Center)
+        .height(28)
+        .into()
     }
 
     /// Twelve days in one row, for picking a date without leaving Quick Entry.

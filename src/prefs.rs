@@ -21,11 +21,71 @@ pub struct Prefs {
     pub lock_needs_secret: bool,
     /// Set when gotodo locks while `lock_needs_secret` is on.
     pub device_paused: bool,
+    /// Where the colors come from.
+    pub colors: ColorSource,
+    /// The highlight color when `colors` is gotodo's own palette.
+    pub accent: Accent,
+    /// Opacity of the main window's content background, 0.3 to 1.0. Below 1.0
+    /// a compositor with blur (SwayFX, KWin, Hyprland) shows the desktop through.
+    pub page_opacity: f32,
+    pub sidebar_opacity: f32,
+    pub quick_opacity: f32,
+    /// Closing the last window keeps gotodo running, and unlocked until
+    /// auto-lock, so Quick Entry opens at once.
+    pub keep_running: bool,
+    /// Quick Entry takes to-dos while gotodo is locked. They wait in memory,
+    /// never on disk, and are added on the next unlock.
+    pub quick_while_locked: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorSource {
+    /// gotodo's palette with the chosen accent.
+    #[default]
+    Gotodo,
+    /// gotodo's palette with the GTK theme's accent.
+    GtkAccent,
+    /// Every color the GTK theme defines.
+    Gtk,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Accent {
+    #[default]
+    Blue,
+    Purple,
+    Pink,
+    Red,
+    Orange,
+    Green,
+    Teal,
+    Graphite,
+}
+
+impl Accent {
+    pub const ALL: [Accent; 8] =
+        [Accent::Blue, Accent::Purple, Accent::Pink, Accent::Red, Accent::Orange, Accent::Green, Accent::Teal, Accent::Graphite];
+}
+
+/// Opacity values outside this range are clamped.
+pub const MIN_OPACITY: f32 = 0.3;
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { appearance: Appearance::Auto, text_scale: 1.0, reduce_motion: false, lock_needs_secret: false, device_paused: false }
+        Self {
+            appearance: Appearance::Auto,
+            text_scale: 1.0,
+            reduce_motion: false,
+            lock_needs_secret: false,
+            device_paused: false,
+            colors: ColorSource::Gotodo,
+            accent: Accent::Blue,
+            page_opacity: 1.0,
+            sidebar_opacity: 1.0,
+            quick_opacity: 1.0,
+            keep_running: true,
+            quick_while_locked: true,
+        }
     }
 }
 

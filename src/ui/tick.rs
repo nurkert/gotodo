@@ -165,6 +165,17 @@ impl App {
             SettingChange::Scale(v) => self.prefs.text_scale = v.clamp(0.7, 2.0),
             SettingChange::ReduceMotion(v) => self.prefs.reduce_motion = v,
             SettingChange::LockNeedsSecret(v) => self.prefs.lock_needs_secret = v && self.can_pause_device(),
+            SettingChange::Colors(v) => {
+                self.prefs.colors = v;
+                // Read again, so edits to gtk.css show up without a restart.
+                self.gtk = if v == crate::prefs::ColorSource::Gotodo { None } else { super::gtk::GtkColors::load() };
+            }
+            SettingChange::Accent(v) => self.prefs.accent = v,
+            SettingChange::KeepRunning(v) => self.prefs.keep_running = v,
+            SettingChange::QuickWhileLocked(v) => self.prefs.quick_while_locked = v,
+            SettingChange::PageOpacity(v) => self.prefs.page_opacity = v.clamp(crate::prefs::MIN_OPACITY, 1.0),
+            SettingChange::SidebarOpacity(v) => self.prefs.sidebar_opacity = v.clamp(crate::prefs::MIN_OPACITY, 1.0),
+            SettingChange::QuickOpacity(v) => self.prefs.quick_opacity = v.clamp(crate::prefs::MIN_OPACITY, 1.0),
             _ => {}
         }
         self.prefs.save();
@@ -181,7 +192,14 @@ impl App {
                 SettingChange::ReminderTitles(v) => s.reminder_shows_title = v,
                 SettingChange::QuickToday(v) => s.quick_entry_to_today = v,
                 SettingChange::DeadlineAlert(v) => s.deadline_alert_minutes = v,
-                SettingChange::LockNeedsSecret(_) => {}
+                SettingChange::LockNeedsSecret(_)
+                | SettingChange::Colors(_)
+                | SettingChange::Accent(_)
+                | SettingChange::PageOpacity(_)
+                | SettingChange::SidebarOpacity(_)
+                | SettingChange::QuickOpacity(_)
+                | SettingChange::KeepRunning(_)
+                | SettingChange::QuickWhileLocked(_) => return false,
             }
             true
         });
