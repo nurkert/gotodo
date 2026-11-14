@@ -511,6 +511,46 @@ pub fn check_mark<'a, Message: 'a>(mark: CheckMark, side: f32) -> Element<'a, Me
     Canvas::new(mark).width(full).height(full).into()
 }
 
+/// A busy indicator: a short arc circling a faint track. `phase` runs 0..1 per turn.
+#[derive(Debug, Clone, Copy)]
+pub struct Spinner {
+    pub phase: f32,
+    pub color: Color,
+}
+
+impl<Message> canvas::Program<Message> for Spinner {
+    type State = ();
+
+    fn draw(&self, _: &(), renderer: &Renderer, _: &Theme, bounds: Rectangle, _: mouse::Cursor) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let center = frame.center();
+        let width = (bounds.width / 9.0).max(1.6);
+        let radius = bounds.width.min(bounds.height) / 2.0 - width;
+        frame.stroke(
+            &Path::circle(center, radius),
+            Stroke { style: stroke::Style::Solid(Color { a: self.color.a * 0.22, ..self.color }), width, ..Stroke::default() },
+        );
+        let start = std::f32::consts::TAU * self.phase - std::f32::consts::FRAC_PI_2;
+        let arc = Path::new(|builder| {
+            builder.arc(canvas::path::Arc {
+                center,
+                radius,
+                start_angle: Radians(start),
+                end_angle: Radians(start + std::f32::consts::TAU * 0.28),
+            });
+        });
+        frame.stroke(
+            &arc,
+            Stroke { style: stroke::Style::Solid(self.color), width, line_cap: stroke::LineCap::Round, ..Stroke::default() },
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+pub fn spinner<'a, Message: 'a>(phase: f32, color: Color, side: f32) -> Element<'a, Message> {
+    Canvas::new(Spinner { phase, color }).width(side).height(side).into()
+}
+
 /// A project's progress ring and pie.
 #[derive(Debug, Clone, Copy)]
 pub struct Pie {

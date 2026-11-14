@@ -20,6 +20,14 @@ pub fn t(english: &'static str) -> &'static str {
     TABLE.iter().find(|(en, _)| *en == english).map_or(english, |(_, de)| de)
 }
 
+/// Key names as printed on a German keyboard: Strg, Entf.
+pub fn keys(text: &str) -> String {
+    if !is_german() {
+        return text.to_owned();
+    }
+    text.replace("Ctrl", "Strg").replace("Del", "Entf")
+}
+
 const WEEKDAYS: [(&str, &str); 7] = [
     ("Monday", "Montag"),
     ("Tuesday", "Dienstag"),
@@ -234,4 +242,146 @@ const TABLE: &[(&str, &str)] = &[
     ("Everything is ready. One click connects it.", "Alles bereit. Ein Klick verbindet es."),
     ("This page updates by itself while you set things up in KeePassXC.", "Diese Seite aktualisiert sich selbst, während du KeePassXC einrichtest."),
     ("Lock KeePassXC and gotodo locks with it. Your password keeps working either way.", "Sperrst du KeePassXC, sperrt sich gotodo mit. Dein Passwort funktioniert weiterhin."),
+    ("Completed", "Erledigt"),
+    ("to-dos completed", "To-Dos erledigt"),
+    ("Canceled", "Abgebrochen"),
+    ("to-dos canceled", "To-Dos abgebrochen"),
+    ("Moved to Trash", "In den Papierkorb gelegt"),
+    ("to-dos moved to Trash", "To-Dos in den Papierkorb gelegt"),
+    ("Saved to", "Gespeichert unter"),
+    ("Restored the copy from", "Wiederhergestellt ist die Kopie vom"),
+    ("Unlock it the way you did then.", "Entsperre sie so wie damals."),
+    ("Hide password", "Passwort verbergen"),
+    ("Show password", "Passwort anzeigen"),
+    ("Caps Lock is on", "Feststelltaste ist an"),
+    ("Long enough", "Lang genug"),
+    ("At least", "Mindestens"),
+    ("characters", "Zeichen"),
+    ("more", "weitere"),
+    ("Passwords match", "Passwörter stimmen überein"),
+    ("Unlocking…", "Wird entsperrt…"),
+    ("Setting up…", "Wird eingerichtet…"),
+    ("You locked gotodo, so this device cannot open it on its own. Unlock once with your password or KeePassXC.", "Du hast gotodo gesperrt, deshalb öffnet dieses Gerät es nicht allein. Entsperre einmal mit deinem Passwort oder KeePassXC."),
+    ("Inbox is empty", "Der Eingang ist leer"),
+    ("New to-dos land here until you give them a place.", "Neue To-Dos landen hier, bis du ihnen einen Platz gibst."),
+    ("Nothing planned for today", "Heute ist nichts geplant"),
+    ("Plan a to-do for today with Ctrl+T.", "Mit Strg+T planst du ein To-Do für heute."),
+    ("Nothing coming up", "Nichts steht an"),
+    ("To-dos with a date show up here, day by day.", "To-Dos mit Datum erscheinen hier, Tag für Tag."),
+    ("Nothing in Anytime", "Nichts unter Jederzeit"),
+    ("To-dos you can do whenever you like.", "To-Dos, die du erledigen kannst, wann du willst."),
+    ("Nothing for someday", "Nichts für irgendwann"),
+    ("Park ideas here that are not for now.", "Parke hier Ideen, die nicht für jetzt sind."),
+    ("The Logbook is empty", "Das Logbuch ist leer"),
+    ("Completed to-dos collect here.", "Erledigte To-Dos sammeln sich hier."),
+    ("Trash is empty", "Der Papierkorb ist leer"),
+    ("Deleted to-dos wait here until you empty it.", "Gelöschte To-Dos warten hier, bis du ihn leerst."),
+    ("No deadlines", "Keine Fristen"),
+    ("To-dos with a deadline show up here.", "To-Dos mit Frist erscheinen hier."),
+    ("Nothing repeats", "Nichts wiederholt sich"),
+    ("Make a to-do repeat with Ctrl+Shift+R.", "Mit Strg+Umschalt+R wiederholt sich ein To-Do."),
+    ("Nothing here yet", "Noch nichts hier"),
+    ("Add the first to-do to this list.", "Leg das erste To-Do in dieser Liste an."),
+    ("new to-do", "neues To-Do"),
+    ("Go to a list", "Zu einer Liste"),
+    ("Open", "Öffnen"),
+    ("Zoom", "Zoom"),
+    ("Create", "Anlegen"),
+    ("Schedule", "Planen"),
+    ("Organize", "Ordnen"),
+    ("Navigate", "Navigieren"),
+    ("App", "App"),
+    ("project", "Projekt"),
+    ("tag", "Tag"),
+    ("when", "wann"),
+    ("deadline", "Frist"),
+    ("completes", "ergänzt"),
+    ("today", "heute"),
+    ("overdue", "überfällig"),
+    ("Move completed to the Logbook", "Erledigte ins Logbuch verschieben"),
+    ("Otherwise new to-dos land in the Inbox.", "Sonst landen neue To-Dos im Eingang."),
+    ("Lock after inactivity", "Sperren nach Inaktivität"),
+    ("Show titles in notifications", "Titel in Benachrichtigungen zeigen"),
+    ("Off: a notification only says that a to-do is due.", "Aus: Eine Benachrichtigung sagt nur, dass ein To-Do fällig ist."),
+    ("Require password after locking", "Nach dem Sperren Passwort verlangen"),
+    ("The device key stays unused until you unlock with your password or KeePassXC.", "Der Geräteschlüssel bleibt ungenutzt, bis du mit Passwort oder KeePassXC entsperrst."),
+    ("Opens gotodo if this computer or KeePassXC cannot.", "Öffnet gotodo, falls dieser Computer oder KeePassXC es nicht kann."),
+    ("Saves the encrypted file to your Documents folder.", "Speichert die verschlüsselte Datei in deinem Dokumente-Ordner."),
+    ("Export a copy", "Kopie exportieren"),
+    ("Export", "Exportieren"),
+    ("Daily copies", "Tägliche Kopien"),
+    ("The first copy is made the next time something changes.", "Die erste Kopie entsteht bei der nächsten Änderung."),
+    ("Restore now", "Jetzt wiederherstellen"),
+    ("Restore", "Wiederherstellen"),
+    ("Locks gotodo and replaces your to-dos with this copy. Today's state is kept.", "Sperrt gotodo und ersetzt deine To-Dos durch diese Kopie. Der heutige Stand bleibt erhalten."),
+    ("Lists", "Listen"),
+    ("Backups", "Sicherungen"),
+    ("gotodo keeps an encrypted copy from each of the last", "gotodo bewahrt eine verschlüsselte Kopie von jedem der letzten"),
+    ("days. Changing the password starts over.", "Tage auf. Ein neues Passwort beginnt von vorn."),
+    ("In 1 hour", "In 1 Stunde"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every English string the UI passes through `t` has a German entry.
+    /// Finds direct `t("…")` calls and the literals handed to the helpers
+    /// that call `t` themselves.
+    #[test]
+    fn every_ui_string_is_translated() {
+        let helpers = [
+            "t(", "setting_row(", "entry(", "group(", "link(", "auth_button(", "password_field(", "say(", "token(",
+            "step(", "action(", "small_field(", "toggle(", "=> (", "(Icon::",
+        ];
+        // Key names stay as they are on the keyboard.
+        let keys = ["Del", "Enter", "Esc", "Ctrl+N", "Ctrl+1–7", "Ctrl+± 0"];
+        let mut missing = Vec::new();
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        let mut files = vec![std::path::PathBuf::from(root)];
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") || path.ends_with("i18n.rs") || path.ends_with("tests.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            // Unit tests sit at the end of a file; their strings are fixtures.
+            let source = source.split("#[cfg(test)]\nmod tests").next().unwrap_or_default();
+            // A call split over lines reads as one line from its opening parenthesis on.
+            let mut joined = String::new();
+            for line in source.lines() {
+                joined.push_str(line.trim());
+                joined.push(if line.trim_end().ends_with('(') { ' ' } else { '\n' });
+            }
+            for line in joined.lines() {
+                let line = line.trim();
+                if line.starts_with("//") {
+                    continue;
+                }
+                let called = |h: &str| {
+                    line.match_indices(h)
+                        .filter(|(i, _)| !line[..*i].ends_with(|c: char| c.is_alphanumeric() || c == '_'))
+                        .map(|(i, _)| i + h.len())
+                        .next()
+                };
+                let Some(start) = helpers.iter().filter_map(|h| called(h)).min() else { continue };
+                let mut rest = &line[start..];
+                while let Some(open) = rest.find('"') {
+                    let after = &rest[open + 1..];
+                    let Some(close) = after.find('"') else { break };
+                    let text = &after[..close];
+                    rest = &after[close + 1..];
+                    let wordy = text.chars().next().is_some_and(char::is_alphabetic);
+                    let code = text.contains("::") || text.contains('{') || (!text.contains(' ') && text.chars().all(|c| c.is_lowercase()));
+                    if wordy && !code && !keys.contains(&text) && !TABLE.iter().any(|(en, _)| *en == text) && !missing.contains(&text.to_owned()) {
+                        missing.push(text.to_owned());
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "missing German for:\n{}", missing.join("\n"));
+    }
+}

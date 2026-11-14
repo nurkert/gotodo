@@ -892,6 +892,16 @@ impl Library {
         out
     }
 
+    /// Moves a reminder `minutes` later, onto the next day if it has to.
+    pub fn snooze(&mut self, id: Id, today: NaiveDate, now: NaiveTime, minutes: i64) {
+        let Some(task) = self.task_mut(id) else { return };
+        let at = today.and_time(now) + chrono::Duration::minutes(minutes);
+        task.schedule = Schedule::On(at.date());
+        task.reminder = Some(at.time());
+        task.reminded_on = None;
+        task.modified = chrono::Utc::now();
+    }
+
     pub fn take_due_reminders(&mut self, today: NaiveDate, now: NaiveTime) -> Vec<Id> {
         let mut out = Vec::new();
         for task in &mut self.tasks {
@@ -1181,5 +1191,24 @@ mod tests {
         let id = todo(&mut lib, Schedule::Anytime);
         lib.task_mut(id).unwrap().tags.push(child);
         assert_eq!(rows(&lib, View::Tag(parent), day(8)), vec![id]);
+    }
+
+    #[test]
+    fn snooze_moves_the_reminder_and_rings_again() {
+        let mut lib = Library::default();
+        let day = NaiveDate::from_ymd_opt(2026, 3, 1).unwrap();
+        let id = lib.insert(Task::new(Kind::Todo, "Call", Schedule::On(day)));
+        lib.task_mut(id).unwrap().reminder = NaiveTime::from_hms_opt(9, 0, 0);
+        let nine = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
+        assert_eq!(lib.take_due_reminders(day, nine), vec![id]);
+        lib.snooze(id, day, nine, 60);
+        assert!(lib.take_due_reminders(day, nine).is_empty());
+        assert_eq!(lib.take_due_reminders(day, NaiveTime::from_hms_opt(10, 0, 0).unwrap()), vec![id]);
+
+        let late = NaiveTime::from_hms_opt(23, 30, 0).unwrap();
+        lib.snooze(id, day, late, 60);
+        let task = lib.task(id).unwrap();
+        assert_eq!(task.schedule, Schedule::On(day.succ_opt().unwrap()));
+        assert_eq!(task.reminder, NaiveTime::from_hms_opt(0, 30, 0));
     }
 }

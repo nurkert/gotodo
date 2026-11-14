@@ -8,6 +8,7 @@ use iced::widget::text_editor;
 use iced::{Settings, Size, window};
 
 use super::*;
+use crate::vault;
 use crate::model::{ChecklistItem, Kind, Library, Schedule, Status, Task, View};
 
 struct Fixture {
@@ -60,7 +61,7 @@ fn sample_library(today: NaiveDate) -> (Library, Id) {
 
 fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let (mut app, _) = App::boot(false);
+    let (mut app, _) = App::boot(Start::Main);
     let today = app.today();
     let (lib, project) = sample_library(today);
     let session = Session::for_tests(lib, &dir.path().join("vault.gotodo"));
@@ -90,9 +91,11 @@ fn titled(app: &App, title: &str) -> Id {
     app.lib().unwrap().tasks.iter().find(|t| t.title == title).expect("task exists").id
 }
 
-fn snapshot(app: &App, window: window::Id, name: &str, size: Size, dark: bool) {
-    let Ok(dir) = std::env::var("GOTODO_SNAPSHOTS") else { return };
-    let path = format!("{dir}/{name}.png");
+const MAIN: Size = Size::new(980.0, 680.0);
+
+/// Renders one window headlessly. With GOTODO_SNAPSHOTS set, the frame is
+/// also written there as a PNG so every screen can be looked at by eye.
+fn snapshot(app: &App, window: window::Id, name: &str, size: Size) {
     let settings = Settings {
         default_font: style::FONT,
         fonts: vec![
@@ -102,10 +105,32 @@ fn snapshot(app: &App, window: window::Id, name: &str, size: Size, dark: bool) {
         ],
         ..Settings::default()
     };
-    let _ = dark;
     let theme = app.theme(window);
     let mut ui = iced_test::Simulator::with_size(settings, size, app.view(window));
-    ui.snapshot(&theme).unwrap().matches_image(&path).unwrap();
+    let frame = ui.snapshot(&theme).unwrap();
+    if let Ok(dir) = std::env::var("GOTODO_SNAPSHOTS") {
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = format!("{dir}/{name}.png");
+        let _ = std::fs::remove_file(format!("{dir}/{name}-wgpu.png"));
+        frame.matches_image(&path).unwrap();
+    }
+}
+
+fn set_appearance(app: &mut App, dark: bool) {
+    let look = if dark { crate::model::Appearance::Dark } else { crate::model::Appearance::Light };
+    if let Some(session) = &mut app.session {
+        session.lib.settings.appearance = look;
+    }
+    app.prefs.appearance = look;
+}
+
+/// Locks the fixture and waits for the lock screen to finish fading in.
+fn lock(f: &mut Fixture, slots: vault::Slots) {
+    run(&mut f.app, Cmd::Lock);
+    f.app.slots = slots;
+    f.app.auth = Auth::Locked { has_keepass: slots.keepass };
+    f.app.booting = false;
+    settle(&mut f.app);
 }
 
 #[test]
@@ -288,6 +313,70 @@ fn keepass_status_does_not_lock_a_password_session() {
 }
 
 #[test]
+fn locking_can_pause_the_device_key_until_a_password_unlock() {
+    let mut f = fixture();
+    f.app.slots = vault::Slots { password: true, keepass: false, device: true };
+    f.app.prefs.lock_needs_secret = true;
+    run(&mut f.app, Cmd::Lock);
+    // `lock` reads the real slots of the open vault, which has no device slot.
+    f.app.slots = vault::Slots { password: true, keepass: false, device: true };
+    f.app.prefs.device_paused = true;
+    assert!(!f.app.device_allowed(), "the device key waits for the password");
+    let _ = f.app.unlock_with_device();
+    assert!(!f.app.auth_busy, "no device attempt while paused");
+
+    f.app.unlock_method = Some(Method::Password);
+    let session = Session::for_tests(Library::default(), &f._dir.path().join("again.gotodo"));
+    let _ = f.app.finish_unlock(session);
+    assert!(!f.app.prefs.device_paused, "a password unlock lifts the pause");
+}
+
+#[test]
+fn completing_offers_undo() {
+    let mut f = fixture();
+    let id = titled(&f.app, "Laufen gehen");
+    let _ = f.app.update(Message::Toggle(id));
+    assert!(f.app.toast.is_some());
+    let _ = f.app.update(Message::ToastUndo);
+    assert!(f.app.toast.is_none());
+    assert_eq!(f.app.lib().unwrap().task(id).unwrap().status, Status::Open);
+}
+
+#[test]
+fn notification_buttons_reach_the_to_do() {
+    let mut f = fixture();
+    let id = titled(&f.app, "Buch zu Ende lesen");
+    let _ = f.app.update(Message::Notified(vec![(41, id)]));
+    let _ = f.app.update(Message::NotificationAction(41, crate::notify::DONE.into()));
+    assert_eq!(f.app.lib().unwrap().task(id).unwrap().status, Status::Completed);
+    // A second press of the same, now forgotten, notification does nothing.
+    let _ = f.app.update(Message::NotificationAction(41, crate::notify::LATER.into()));
+    assert_eq!(f.app.lib().unwrap().task(id).unwrap().status, Status::Completed);
+}
+
+#[test]
+fn startup_stays_quiet_until_the_automatic_unlock_gives_up() {
+    let mut f = fixture();
+    run(&mut f.app, Cmd::Lock);
+    f.app.booting = true;
+    f.app.skip_auto_unlock = false;
+    let _ = f.app.update(Message::KeePassProbe(keepass::Status::Locked, true));
+    assert!(!f.app.booting, "a locked KeePassXC ends the quiet start");
+}
+
+#[test]
+fn status_line_counts_without_titles() {
+    let mut f = fixture();
+    f.app.publish_status();
+    assert!(f.app.published.contains("\"text\":\"5\""), "{}", f.app.published);
+    assert!(f.app.published.contains("overdue") || f.app.published.contains("today"));
+    assert!(!f.app.published.contains("Laufen"));
+    run(&mut f.app, Cmd::Lock);
+    f.app.publish_status();
+    assert!(f.app.published.contains("locked"));
+}
+
+#[test]
 fn manual_lock_is_not_undone_by_an_unlocked_keepass() {
     let mut f = fixture();
     run(&mut f.app, Cmd::Lock);
@@ -298,53 +387,137 @@ fn manual_lock_is_not_undone_by_an_unlocked_keepass() {
 
 #[test]
 fn every_screen_renders() {
-    let main = Size::new(980.0, 680.0);
-    let sheet_cases = [(Cmd::MoveTo, "move"), (Cmd::Find, "find"), (Cmd::Settings, "settings"), (Cmd::Help, "help")];
+    let sheet_cases = [
+        (Cmd::MoveTo, "move"),
+        (Cmd::Find, "find"),
+        (Cmd::Settings, "settings"),
+        (Cmd::Help, "help"),
+        (Cmd::When, "when"),
+        (Cmd::Tags, "tags"),
+        (Cmd::Palette, "palette"),
+        (Cmd::ConnectKeePass, "keepass"),
+    ];
     for dark in [false, true] {
         let tag = if dark { "dark" } else { "light" };
         let mut f = fixture();
-        if let Some(session) = &mut f.app.session {
-            session.lib.settings.appearance =
-                if dark { crate::model::Appearance::Dark } else { crate::model::Appearance::Light };
-        }
+        set_appearance(&mut f.app, dark);
         let window = f.window;
-        snapshot(&f.app, window, &format!("{tag}-today"), main, dark);
+        snapshot(&f.app, window, &format!("{tag}-today"), MAIN);
 
         let id = titled(&f.app, "Paket zur Post bringen");
         let _ = f.app.update(Message::RowOpen(id));
         f.app.notes = text_editor::Content::with_text("Adresse steht in der Mail.");
         settle(&mut f.app);
-        snapshot(&f.app, window, &format!("{tag}-expanded"), main, dark);
+        snapshot(&f.app, window, &format!("{tag}-expanded"), MAIN);
         let _ = f.app.update(Message::TitleDone);
+        settle(&mut f.app);
+
+        let done = titled(&f.app, "Laufen gehen");
+        let _ = f.app.update(Message::Toggle(done));
+        settle(&mut f.app);
+        snapshot(&f.app, window, &format!("{tag}-toast"), MAIN);
+        let _ = f.app.update(Message::ToastUndo);
         settle(&mut f.app);
 
         f.app.selection = vec![id];
         for (cmd, name) in sheet_cases {
             run(&mut f.app, cmd);
             settle(&mut f.app);
-            snapshot(&f.app, window, &format!("{tag}-{name}"), main, dark);
+            snapshot(&f.app, window, &format!("{tag}-{name}"), MAIN);
             let _ = f.app.update(Message::SheetClose);
             settle(&mut f.app);
         }
 
-        let _ = f.app.update(Message::Go(View::Project(f.project)));
+        for (view, name) in [(View::Project(f.project), "project"), (View::Upcoming, "upcoming"), (View::Someday, "empty")] {
+            let _ = f.app.update(Message::Go(view));
+            settle(&mut f.app);
+            snapshot(&f.app, window, &format!("{tag}-{name}"), MAIN);
+        }
+        let _ = f.app.update(Message::Go(View::Today));
         settle(&mut f.app);
-        snapshot(&f.app, window, &format!("{tag}-project"), main, dark);
-        let _ = f.app.update(Message::Go(View::Upcoming));
-        settle(&mut f.app);
-        snapshot(&f.app, window, &format!("{tag}-upcoming"), main, dark);
+        let narrow = Size::new(560.0, 420.0);
+        let _ = f.app.update(Message::Resized(window, narrow));
+        snapshot(&f.app, window, &format!("{tag}-narrow"), narrow);
+        let _ = f.app.update(Message::Resized(window, MAIN));
 
         let popup = window::Id::unique();
         f.app.quick = Some(popup);
-        f.app.quick_text = "Dübel kaufen #haus @besorgung !morgen".into();
-        snapshot(&f.app, popup, &format!("{tag}-quick"), QUICK_SIZE, dark);
-        f.app.quick_text = "Dübel kaufen #ha".into();
-        snapshot(&f.app, popup, &format!("{tag}-quick-complete"), QUICK_SIZE, dark);
+        for (text, name) in [
+            ("", "quick-empty"),
+            ("Dübel kaufen #haus @besorgung !morgen", "quick"),
+            ("Dübel kaufen #haus @besorgung !morgen ^fr ", "quick-full"),
+            ("Dübel kaufen #ha", "quick-complete"),
+        ] {
+            f.app.quick_text = text.into();
+            snapshot(&f.app, popup, &format!("{tag}-{name}"), QUICK_SIZE);
+        }
+        f.app.quick_text = "Dübel kaufen".into();
+        let _ = f.app.update(Message::QuickCal('!'));
+        settle(&mut f.app);
+        snapshot(&f.app, popup, &format!("{tag}-quick-cal"), QUICK_SIZE);
         f.app.quick = None;
+        f.app.quick_cal = None;
+    }
+}
 
-        run(&mut f.app, Cmd::Lock);
-        snapshot(&f.app, window, &format!("{tag}-locked"), main, dark);
+#[test]
+fn every_lock_state_renders() {
+    let password_only = vault::Slots { password: true, keepass: false, device: false };
+    let everything = vault::Slots { password: true, keepass: true, device: true };
+    let device_only = vault::Slots { password: false, keepass: false, device: true };
+    for dark in [false, true] {
+        let tag = if dark { "dark" } else { "light" };
+        let mut f = fixture();
+        set_appearance(&mut f.app, dark);
+        let window = f.window;
+
+        lock(&mut f, password_only);
+        snapshot(&f.app, window, &format!("{tag}-locked"), MAIN);
+        f.app.password = "secret".into();
+        f.app.auth_error = Some("Wrong password".into());
+        snapshot(&f.app, window, &format!("{tag}-locked-error"), MAIN);
+        f.app.auth_error = None;
+        f.app.caps_lock = true;
+        snapshot(&f.app, window, &format!("{tag}-locked-caps"), MAIN);
+        f.app.caps_lock = false;
+        f.app.auth_busy = true;
+        snapshot(&f.app, window, &format!("{tag}-locked-busy"), MAIN);
+        f.app.auth_busy = false;
+        f.app.password.clear();
+
+        lock(&mut f, everything);
+        snapshot(&f.app, window, &format!("{tag}-locked-device"), MAIN);
+        f.app.prefs.device_paused = true;
+        snapshot(&f.app, window, &format!("{tag}-locked-paused"), MAIN);
+        f.app.prefs.device_paused = false;
+        f.app.booting = true;
+        snapshot(&f.app, window, &format!("{tag}-booting"), MAIN);
+        f.app.booting = false;
+
         f.app.auth = Auth::Setup;
-        snapshot(&f.app, window, &format!("{tag}-setup"), main, dark);
+        f.app.setup_password = false;
+        snapshot(&f.app, window, &format!("{tag}-setup"), MAIN);
+        f.app.setup_password = true;
+        snapshot(&f.app, window, &format!("{tag}-setup-password"), MAIN);
+        f.app.password = "short".into();
+        f.app.repeat = "shx".into();
+        snapshot(&f.app, window, &format!("{tag}-setup-mismatch"), MAIN);
+        f.app.password = "long enough password".into();
+        f.app.repeat = "long enough password".into();
+        snapshot(&f.app, window, &format!("{tag}-setup-ready"), MAIN);
+        f.app.password.clear();
+        f.app.repeat.clear();
+
+        let popup = window::Id::unique();
+        f.app.quick = Some(popup);
+        f.app.auth = Auth::Locked { has_keepass: false };
+        f.app.slots = password_only;
+        snapshot(&f.app, popup, &format!("{tag}-quick-locked"), QUICK_SIZE);
+        f.app.auth_error = Some("Wrong password".into());
+        snapshot(&f.app, popup, &format!("{tag}-quick-locked-error"), QUICK_SIZE);
+        f.app.auth_error = None;
+        f.app.slots = device_only;
+        snapshot(&f.app, popup, &format!("{tag}-quick-locked-device"), QUICK_SIZE);
+        f.app.quick = None;
     }
 }
