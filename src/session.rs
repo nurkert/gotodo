@@ -33,9 +33,7 @@ pub struct Session {
 }
 
 pub fn vault_path() -> PathBuf {
-    directories::ProjectDirs::from("org", "gotodo", "gotodo")
-        .map(|dirs| dirs.data_dir().join("vault.gotodo"))
-        .unwrap_or_else(|| PathBuf::from("vault.gotodo"))
+    crate::paths::vault()
 }
 
 fn serialize(lib: &Library) -> Zeroizing<Vec<u8>> {
@@ -60,7 +58,11 @@ impl Session {
                             SaveJob::Stop => stop = true,
                         }
                     }
-                    let result = vault.lock().expect("vault lock").save(&latest);
+                    let vault = vault.lock().expect("vault lock");
+                    // A failed copy must not stop the save itself.
+                    let _ = crate::backup::daily(vault.path(), crate::model::local_today());
+                    let result = vault.save(&latest);
+                    drop(vault);
                     *save_error.lock().expect("error lock") = result.err().map(|e| e.to_string());
                     if stop {
                         break;

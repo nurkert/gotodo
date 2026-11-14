@@ -482,6 +482,10 @@ impl Vault {
         Ok((Self { path: path.to_owned(), header, header_bytes, key, kdf, _lock: lock }, plain))
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn vault_id(&self) -> &str {
         &self.header.vault_id
     }

@@ -11,6 +11,42 @@ pub const FONT: Font = Font::with_name(FAMILY);
 pub const MEDIUM: Font = Font { weight: font::Weight::Medium, ..FONT };
 pub const SEMIBOLD: Font = Font { weight: font::Weight::Semibold, ..FONT };
 
+/// The type scale. Every text size in the app is one of these steps.
+pub mod size {
+    /// Key caps, counts and the smallest captions.
+    pub const XS: f32 = 11.0;
+    /// Meta lines, chips, helper text.
+    pub const SM: f32 = 12.0;
+    /// Secondary text: sidebar, settings, section headers.
+    pub const MD: f32 = 13.0;
+    /// To-dos, list items and inputs.
+    pub const BODY: f32 = 14.0;
+    /// Quick Entry and the sheet filter field.
+    pub const LG: f32 = 16.0;
+    /// Sheet titles and day numbers.
+    pub const XL: f32 = 20.0;
+    /// The lock screen heading.
+    pub const XXL: f32 = 24.0;
+    /// Page titles.
+    pub const DISPLAY: f32 = 28.0;
+}
+
+/// Corner radii, from chips up to cards.
+pub mod radius {
+    /// Key caps.
+    pub const XS: f32 = 4.0;
+    /// Chips and tags.
+    pub const SM: f32 = 6.0;
+    /// Buttons, inputs, list rows, tooltips.
+    pub const MD: f32 = 8.0;
+    /// The open to-do and other raised rows.
+    pub const LG: f32 = 12.0;
+    /// Sheets, cards and the lock mark.
+    pub const XL: f32 = 16.0;
+    /// Pills and circles.
+    pub const FULL: f32 = 999.0;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
     pub dark: bool,
@@ -34,21 +70,53 @@ pub struct Palette {
     pub backdrop: Color,
 }
 
+impl Palette {
+    /// `tint` as text: bright hues get darker on light pages, dark hues
+    /// lighter on dark ones, until they read at 4.5:1 on a raised surface.
+    pub fn ink(&self, tint: Color) -> Color {
+        let toward = if self.dark { Color::WHITE } else { Color::BLACK };
+        let mut k = 0.0;
+        let mut ink = tint;
+        while contrast(ink, self.raised) < 4.5 && k < 0.7 {
+            k += 0.04;
+            ink = Color {
+                r: tint.r + (toward.r - tint.r) * k,
+                g: tint.g + (toward.g - tint.g) * k,
+                b: tint.b + (toward.b - tint.b) * k,
+                a: tint.a,
+            };
+        }
+        ink
+    }
+}
+
+fn luminance(c: Color) -> f32 {
+    let f = |v: f32| if v <= 0.039_28 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+}
+
+/// WCAG contrast ratio of two opaque colors.
+pub fn contrast(a: Color, b: Color) -> f32 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
 pub const LIGHT: Palette = Palette {
     dark: false,
     page: color!(0xffffff),
     sidebar: color!(0xf5f4f1),
     raised: color!(0xffffff),
     text: color!(0x25272b),
-    muted: color!(0x74787f),
-    faint: color!(0xb4b7bc),
+    // Text contrast on page and sidebar: muted at least 4.5:1, faint at least 3:1.
+    muted: color!(0x676b72),
+    faint: color!(0x868a91),
     line: color!(0xe8e8e6),
     hover: Color::from_rgba(0.0, 0.0, 0.0, 0.045),
     selected: color!(0xd7e8fd),
-    accent: color!(0x2f7bf0),
+    accent: color!(0x276ad6),
     on_accent: color!(0xffffff),
     gold: color!(0xf2b92c),
-    red: color!(0xe2445c),
+    red: color!(0xcf3550),
     teal: color!(0x2fa394),
     violet: color!(0x7b5cdc),
     green: color!(0x4bae6e),
@@ -63,7 +131,7 @@ pub const DARK: Palette = Palette {
     raised: color!(0x2a2d33),
     text: color!(0xe9eaec),
     muted: color!(0x9a9ea6),
-    faint: color!(0x62666e),
+    faint: color!(0x7a7f87),
     line: color!(0x33363c),
     hover: Color::from_rgba(1.0, 1.0, 1.0, 0.06),
     selected: color!(0x23406a),
@@ -89,7 +157,7 @@ pub fn panel(background: Color) -> impl Fn(&Theme) -> container::Style {
 pub fn card(p: Palette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(p.raised.into()),
-        border: Border { radius: 14.0.into(), width: 1.0, color: p.line },
+        border: Border { radius: radius::XL.into(), width: 1.0, color: p.line },
         shadow: Shadow {
             color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.5 } else { 0.14 }),
             offset: Vector::new(0.0, 10.0),
@@ -103,7 +171,7 @@ pub fn card(p: Palette) -> impl Fn(&Theme) -> container::Style {
 pub fn open_row(p: Palette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(p.raised.into()),
-        border: Border { radius: 12.0.into(), width: 1.0, color: p.line },
+        border: Border { radius: radius::LG.into(), width: 1.0, color: p.line },
         shadow: Shadow {
             color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.4 } else { 0.1 }),
             offset: Vector::new(0.0, 2.0),
@@ -117,7 +185,7 @@ pub fn open_row(p: Palette) -> impl Fn(&Theme) -> container::Style {
 pub fn mark(p: Palette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(Color { a: if p.dark { 0.16 } else { 0.11 }, ..p.accent }.into()),
-        border: Border { radius: 22.0.into(), ..Border::default() },
+        border: Border { radius: radius::XL.into(), ..Border::default() },
         ..container::Style::default()
     }
 }
@@ -148,7 +216,7 @@ pub fn fading_input(p: Palette, a: f32) -> impl Fn(&Theme, text_input::Status) -
 pub fn tip(p: Palette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(p.raised.into()),
-        border: Border { radius: 8.0.into(), width: 1.0, color: p.line },
+        border: Border { radius: radius::MD.into(), width: 1.0, color: p.line },
         shadow: Shadow {
             color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.45 } else { 0.12 }),
             offset: Vector::new(0.0, 4.0),
@@ -158,10 +226,19 @@ pub fn tip(p: Palette) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+/// A key on the keyboard, as shown next to a command.
+pub fn keycap(p: Palette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(p.hover.into()),
+        border: Border { radius: radius::XS.into(), width: 1.0, color: p.line },
+        ..container::Style::default()
+    }
+}
+
 pub fn solid_chip(tint: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(tint.into()),
-        border: rounded(8.0),
+        border: rounded(radius::FULL),
         ..container::Style::default()
     }
 }
@@ -169,16 +246,16 @@ pub fn solid_chip(tint: Color) -> impl Fn(&Theme) -> container::Style {
 pub fn row_bg(background: Option<Color>) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background.map(Background::Color),
-        border: rounded(9.0),
+        border: rounded(radius::MD),
         ..container::Style::default()
     }
 }
 
 pub fn chip(p: Palette, tint: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        text_color: Some(tint),
+        text_color: Some(p.ink(tint)),
         background: Some(Color { a: if p.dark { 0.2 } else { 0.13 }, ..tint }.into()),
-        border: rounded(6.0),
+        border: rounded(radius::SM),
         ..container::Style::default()
     }
 }
@@ -199,7 +276,67 @@ pub fn quiet_button(p: Palette, active: bool) -> impl Fn(&Theme, button::Status)
             _ => None,
         },
         text_color: p.text,
-        border: rounded(8.0),
+        border: rounded(radius::MD),
+        ..button::Style::default()
+    }
+}
+
+/// The rounded box that groups related setting rows.
+pub fn group(p: Palette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(if p.dark { Color::from_rgba(1.0, 1.0, 1.0, 0.025) } else { Color::from_rgba(0.0, 0.0, 0.0, 0.018) }.into()),
+        border: Border { radius: radius::LG.into(), width: 1.0, color: p.line },
+        ..container::Style::default()
+    }
+}
+
+/// The track behind a segmented control.
+pub fn segment_track(p: Palette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(p.hover.into()),
+        border: rounded(radius::MD),
+        ..container::Style::default()
+    }
+}
+
+/// One option of a segmented control; the chosen one sits raised on the track.
+pub fn segment(p: Palette, active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| button::Style {
+        background: match (active, status) {
+            (true, _) => Some(p.raised.into()),
+            (false, button::Status::Hovered) => Some(p.hover.into()),
+            _ => None,
+        },
+        text_color: if active { p.text } else { p.muted },
+        border: Border { radius: (radius::MD - 2.0).into(), width: if active { 1.0 } else { 0.0 }, color: p.line },
+        shadow: if active {
+            Shadow { color: Color::from_rgba(0.0, 0.0, 0.0, if p.dark { 0.35 } else { 0.08 }), offset: Vector::new(0.0, 1.0), blur_radius: 2.0 }
+        } else {
+            Shadow::default()
+        },
+        ..button::Style::default()
+    }
+}
+
+/// A plain bordered button for secondary actions.
+pub fn secondary_button(p: Palette) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| button::Style {
+        background: Some(match status {
+            button::Status::Hovered | button::Status::Pressed => p.hover,
+            _ => Color::TRANSPARENT,
+        }.into()),
+        text_color: if matches!(status, button::Status::Disabled) { p.faint } else { p.text },
+        border: Border { radius: radius::MD.into(), width: 1.0, color: p.line },
+        ..button::Style::default()
+    }
+}
+
+/// Red text and outline, for the second click of something hard to undo.
+pub fn danger_button(p: Palette) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| button::Style {
+        background: Some(Color { a: if matches!(status, button::Status::Hovered) { 0.16 } else { 0.1 }, ..p.red }.into()),
+        text_color: p.red,
+        border: Border { radius: radius::MD.into(), width: 1.0, color: Color { a: 0.5, ..p.red } },
         ..button::Style::default()
     }
 }
@@ -215,7 +352,7 @@ pub fn primary_button(p: Palette) -> impl Fn(&Theme, button::Status) -> button::
             .into(),
         ),
         text_color: p.on_accent,
-        border: rounded(9.0),
+        border: rounded(radius::MD),
         ..button::Style::default()
     }
 }
@@ -232,18 +369,26 @@ pub fn bare_input(p: Palette) -> impl Fn(&Theme, text_input::Status) -> text_inp
     }
 }
 
-pub fn boxed_input(p: Palette) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
-    move |_, status| text_input::Style {
-        background: p.raised.into(),
-        border: Border {
-            radius: 9.0.into(),
-            width: 1.0,
-            color: if matches!(status, text_input::Status::Focused { .. }) { p.accent } else { p.line },
-        },
-        icon: p.muted,
-        placeholder: p.faint,
-        value: p.text,
-        selection: p.selected,
+/// A boxed field that turns red while `error` is set.
+pub fn field(p: Palette, error: bool) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
+    move |_, status| {
+        let focused = matches!(status, text_input::Status::Focused { .. });
+        text_input::Style {
+            background: p.raised.into(),
+            border: Border {
+                radius: radius::MD.into(),
+                width: if error { 1.5 } else { 1.0 },
+                color: match (error, focused) {
+                    (true, _) => p.red,
+                    (false, true) => p.accent,
+                    (false, false) => p.line,
+                },
+            },
+            icon: p.muted,
+            placeholder: p.faint,
+            value: p.text,
+            selection: p.selected,
+        }
     }
 }
 
@@ -290,7 +435,6 @@ pub enum Icon {
     Tag,
     Flag,
     Moon,
-    Sun,
     Left,
     Right,
     Repeat,
@@ -304,6 +448,10 @@ pub enum Icon {
     Bell,
     Command,
     Check,
+    Eye,
+    EyeOff,
+    Caps,
+    Alert,
 }
 
 impl Icon {
@@ -324,7 +472,6 @@ impl Icon {
             Self::Moon => r#"<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z" fill="black"/>"#,
             Self::Left => r#"<path d="m15 5-7 7 7 7"/>"#,
             Self::Right => r#"<path d="m9 5 7 7-7 7"/>"#,
-            Self::Sun => r#"<circle cx="12" cy="12" r="4.2" fill="black"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>"#,
             Self::Repeat => r#"<path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H20m0 0-3-3m3 3-3 3M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H4m0 0 3-3m-3 3 3 3"/>"#,
             Self::Search => r#"<circle cx="10.5" cy="10.5" r="6.5" fill="black" fill-opacity=".12" stroke="none"/><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>"#,
             Self::Arrow => r#"<path d="M5 12h14m-5.5-5.5L19 12l-5.5 5.5"/>"#,
@@ -336,6 +483,10 @@ impl Icon {
             Self::Bell => r#"<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" fill="black" fill-opacity=".18" stroke="none"/><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 21h4"/>"#,
             Self::Command => r#"<path d="m5 7 5 5-5 5M12.5 18H19"/>"#,
             Self::Check => r#"<path d="m5 12.5 4.5 4.5L19 7.5"/>"#,
+            Self::Eye => r#"<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>"#,
+            Self::EyeOff => r#"<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/>"#,
+            Self::Caps => r#"<path d="M12 4 4.5 12h4v4h7v-4h4z" fill="black" fill-opacity=".18" stroke="none"/><path d="M12 4 4.5 12h4v4h7v-4h4zM8.5 20h7"/>"#,
+            Self::Alert => r#"<circle cx="12" cy="12" r="8.5" fill="black" fill-opacity=".16" stroke="none"/><circle cx="12" cy="12" r="8.5"/><path d="M12 7.8v4.9M12 16.2v.01"/>"#,
         }
     }
 
@@ -355,4 +506,23 @@ pub fn icon<'a, Message: 'a>(which: Icon, size: impl Into<iced::Pixels>, tint: C
         .height(side)
         .style(move |_, _| svg::Style { color: Some(tint) })
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_colors_meet_contrast() {
+        for p in [LIGHT, DARK] {
+            for surface in [p.page, p.sidebar, p.raised] {
+                assert!(contrast(p.text, surface) >= 7.0);
+                assert!(contrast(p.muted, surface) >= 4.5, "muted on {surface:?}: {}", contrast(p.muted, surface));
+                assert!(contrast(p.faint, surface) >= 3.0, "faint on {surface:?}: {}", contrast(p.faint, surface));
+            }
+            for tint in [p.gold, p.teal, p.red, p.accent, p.green, p.violet] {
+                assert!(contrast(p.ink(tint), p.raised) >= 4.4, "{tint:?}");
+            }
+        }
+    }
 }
