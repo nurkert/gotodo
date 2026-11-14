@@ -29,11 +29,6 @@ impl Spring {
         Self { value, velocity: 0.0, target: value, stiffness: STIFFNESS, damping: DAMPING }
     }
 
-    /// A snappier spring for small surfaces such as the Quick Entry popup.
-    pub fn quick(value: f32) -> Self {
-        Self { stiffness: 2200.0, damping: 92.0, ..Self::at(value) }
-    }
-
     pub fn to(&mut self, target: f32) {
         self.target = target;
     }
@@ -576,22 +571,32 @@ impl<Message> canvas::Program<Message> for Pie {
             &Path::circle(center, radius),
             Stroke { style: stroke::Style::Solid(self.color), width: 1.4, ..Stroke::default() },
         );
-        if self.share > 0.0 {
-            let start = -std::f32::consts::FRAC_PI_2;
-            let pie = Path::new(|builder| {
-                builder.move_to(center);
-                builder.arc(canvas::path::Arc {
-                    center,
-                    radius: radius - 2.2,
-                    start_angle: Radians(start),
-                    end_angle: Radians(start + std::f32::consts::TAU * self.share.min(1.0)),
-                });
-                builder.close();
-            });
-            frame.fill(&pie, self.color);
+        let share = self.share.clamp(0.0, 1.0);
+        if share > 0.0 {
+            frame.fill(&sector(center, radius - 2.2, share), self.color);
         }
         vec![frame.into_geometry()]
     }
+}
+
+/// A clock-hand wedge from twelve o'clock, clockwise, covering `share` of the
+/// circle. Built from straight segments: iced's `arc` starts a new subpath, so
+/// a wedge drawn with it loses its center and fills only the chord's segment.
+fn sector(center: Point, radius: f32, share: f32) -> Path {
+    if share >= 0.999 {
+        return Path::circle(center, radius);
+    }
+    let start = -std::f32::consts::FRAC_PI_2;
+    let sweep = std::f32::consts::TAU * share;
+    let steps = ((96.0 * share).ceil() as usize).max(2);
+    Path::new(|builder| {
+        builder.move_to(center);
+        for step in 0..=steps {
+            let angle = start + sweep * step as f32 / steps as f32;
+            builder.line_to(Point::new(center.x + radius * angle.cos(), center.y + radius * angle.sin()));
+        }
+        builder.close();
+    })
 }
 
 pub fn pie<'a, Message: 'a>(share: f32, color: Color, side: f32) -> Element<'a, Message> {

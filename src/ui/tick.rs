@@ -124,7 +124,6 @@ impl App {
         let reduce = self.reduce_motion();
         self.view_anim.step(dt, reduce);
         self.sheet_anim.step(dt, reduce);
-        self.quick_anim.step(dt, reduce);
         self.quick_cal_slide.step(dt, reduce);
         if self.auth_busy || self.booting {
             self.spin = (self.spin + dt * 1.1).fract();

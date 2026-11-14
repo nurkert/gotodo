@@ -601,3 +601,14 @@ fn every_lock_state_renders() {
         f.app.quick = None;
     }
 }
+
+#[test]
+fn progress_pie_fills_like_a_clock() {
+    let element: iced::Element<'_, Message> = super::motion::pie(2.0 / 3.0, style::LIGHT.accent, 64.0);
+    let mut ui = iced_test::Simulator::with_size(Settings::default(), Size::new(64.0, 64.0), element);
+    let frame = ui.snapshot(&style::base_theme(&style::LIGHT)).unwrap();
+    if let Ok(dir) = std::env::var("GOTODO_SNAPSHOTS") {
+        std::fs::create_dir_all(&dir).unwrap();
+        frame.matches_image(format!("{dir}/pie-two-thirds.png")).unwrap();
+    }
+}

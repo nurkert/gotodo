@@ -12,8 +12,6 @@ impl App {
         self.quick_text.clear();
         self.quick_cal = None;
         self.quick_unlock = false;
-        self.quick_anim = Spring::quick(0.0);
-        self.quick_anim.to(1.0);
         open.map(Message::Opened)
     }
 

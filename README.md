@@ -12,7 +12,7 @@ Download the `.deb` for your architecture from the
 [releases page](https://github.com/nurkert/gotodo/releases), then:
 
 ```sh
-sudo apt install ./gotodo_0.0.11_amd64.deb
+sudo apt install ./gotodo_0.0.12_amd64.deb
 ```
 
 ## Quick Entry and Sway
@@ -188,7 +188,7 @@ Pushing a tag that matches the version in `Cargo.toml` builds, tests and
 publishes `amd64` and `arm64` packages:
 
 ```sh
-git tag v0.0.11 && git push origin v0.0.11
+git tag v0.0.12 && git push origin v0.0.12
 ```
 
 Inter is licensed under the SIL Open Font License, see `assets/fonts/OFL.txt`.

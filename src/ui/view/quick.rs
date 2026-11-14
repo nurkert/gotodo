@@ -6,12 +6,9 @@ use iced::widget::{column, row};
 impl App {
     pub(super) fn quick_view(&self) -> El<'_> {
         let p = self.palette();
-        let see_through = crate::ui::quick_transparent();
-        let k = self.quick_anim.value.clamp(0.0, 1.0);
-        // One spring drives three staggered stages: the card, the input, the details.
-        let card_a = if see_through { (k / 0.4).min(1.0) } else { 1.0 };
-        let input_a = ((k - 0.12) / 0.55).clamp(0.0, 1.0);
-        let meta_a = ((k - 0.30) / 0.60).clamp(0.0, 1.0);
+        // No entrance animation: the compositor shows the window and its blur
+        // in the first frame, so the content has to be there in that frame too.
+        let (card_a, input_a, meta_a) = (1.0, 1.0, 1.0);
 
         let queues = self.quick_queues();
         let content: El<'_> = if !matches!(self.auth, Auth::Open) && !queues {
