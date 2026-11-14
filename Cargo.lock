@@ -1377,7 +1377,7 @@ dependencies = [
 
 [[package]]
 name = "gotodo"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "argon2",
  "base64",

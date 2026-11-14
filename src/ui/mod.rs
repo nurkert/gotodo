@@ -72,8 +72,6 @@ pub enum Message {
     Opened(window::Id),
     Closed(window::Id),
     Resized(window::Id, Size),
-    Focus(window::Id, bool),
-    Pointer(window::Id, bool),
     Ipc(ipc::Command),
     Frame(Instant),
     Tick,
@@ -308,8 +306,6 @@ pub struct App {
     pub main_size: Size,
 
     pub quick_text: String,
-    quick_had_focus: bool,
-    quick_pointer_inside: bool,
     pub modifiers: Modifiers,
 
     pub password_old: String,
@@ -468,8 +464,6 @@ impl App {
             cursor: Point::ORIGIN,
             main_size: Size::new(980.0, 680.0),
             quick_text: String::new(),
-            quick_had_focus: false,
-            quick_pointer_inside: false,
             modifiers: Modifiers::default(),
             password_old: String::new(),
             password_new: String::new(),
@@ -677,12 +671,6 @@ impl App {
                     self.main_size = size;
                 }
             }
-            Message::Focus(id, focused) => return self.on_focus(id, focused),
-            Message::Pointer(id, inside) => {
-                if Some(id) == self.quick {
-                    self.quick_pointer_inside = inside;
-                }
-            }
             Message::Frame(now) => return self.on_frame(now),
             Message::Tick => return self.on_tick(),
             Message::Key(press) => return self.on_key(press),
@@ -844,10 +832,6 @@ fn global_event(event: Event, status: event::Status, window: window::Id) -> Opti
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => Some(Message::ModifiersChanged(modifiers)),
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::ButtonReleased),
         Event::Window(window::Event::Resized(size)) => Some(Message::Resized(window, size)),
-        Event::Window(window::Event::Focused) => Some(Message::Focus(window, true)),
-        Event::Window(window::Event::Unfocused) => Some(Message::Focus(window, false)),
-        Event::Mouse(mouse::Event::CursorEntered) => Some(Message::Pointer(window, true)),
-        Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Pointer(window, false)),
         _ => None,
     }
 }

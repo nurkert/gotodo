@@ -210,18 +210,6 @@ fn quick_entry_parses_tokens_and_closes() {
 }
 
 #[test]
-fn quick_entry_stays_when_only_the_pointer_moves_away() {
-    let mut f = fixture();
-    let popup = window::Id::unique();
-    f.app.quick = Some(popup);
-    let _ = f.app.update(Message::Focus(popup, true));
-    let _ = f.app.update(Message::Pointer(popup, true));
-    assert!(f.app.closes_on_blur(), "a keyboard switch away still dismisses it");
-    let _ = f.app.update(Message::Pointer(popup, false));
-    assert!(!f.app.closes_on_blur(), "focus-follows-mouse must not dismiss it");
-}
-
-#[test]
 fn shift_enter_keeps_quick_entry_open_for_the_next_item() {
     let mut f = fixture();
     f.app.quick = Some(window::Id::unique());

@@ -9,8 +9,6 @@ impl App {
         }
         let (id, open) = window::open(quick_settings());
         self.quick = Some(id);
-        self.quick_had_focus = false;
-        self.quick_pointer_inside = false;
         self.quick_text.clear();
         self.quick_cal = None;
         self.quick_anim = Spring::quick(0.0);
@@ -61,28 +59,9 @@ impl App {
         IcedTask::batch([operation::focus(quick_id()), operation::move_cursor_to_end(quick_id())])
     }
 
-    /// Quick Entry closes on Esc, on its shortcut, or when focus leaves while
-    /// the pointer is over it (a keyboard switch to another window). With
-    /// focus-follows-mouse, merely moving the pointer away also takes focus;
-    /// that must not dismiss it, so focus lost with the pointer outside is ignored.
-    pub(super) fn on_focus(&mut self, id: window::Id, focused: bool) -> Task2 {
-        if Some(id) != self.quick {
-            return IcedTask::none();
-        }
-        if focused {
-            self.quick_had_focus = true;
-            return IcedTask::none();
-        }
-        if self.closes_on_blur() {
-            return self.close_quick();
-        }
-        IcedTask::none()
-    }
-
-    pub(super) fn closes_on_blur(&self) -> bool {
-        self.quick_had_focus && self.quick_pointer_inside && !self.auth_busy
-    }
-
+    /// Quick Entry closes only on Esc, its shortcut, or after saving. Losing
+    /// focus does not close it: with focus-follows-mouse, merely moving the
+    /// pointer across it would.
     pub(super) fn close_quick(&mut self) -> Task2 {
         // Dismiss in one cut: the compositor keeps blur and border for as long as
         // the window exists, so fading the contents would leave an empty box behind.

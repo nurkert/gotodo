@@ -12,7 +12,7 @@ Download the `.deb` for your architecture from the
 [releases page](https://github.com/nurkert/gotodo/releases), then:
 
 ```sh
-sudo apt install ./gotodo_0.0.9_amd64.deb
+sudo apt install ./gotodo_0.0.10_amd64.deb
 ```
 
 ## Quick Entry and Sway
@@ -31,8 +31,8 @@ Without `--background`, gotodo exits when its last window closes, and the next
 window of the running instance.
 
 No `for_window` rule is needed: the popup has a fixed size, so Sway floats and
-centers it instead of tiling it. It closes on Esc, on its shortcut, or when you
-switch away with the keyboard; moving the pointer off it does not close it. Its
+centers it instead of tiling it. It closes on Esc or on its shortcut, never just
+because focus or the pointer moved elsewhere. Its
 `app_id` is `gotodo-quick` if you want to style it. The main window's `app_id`
 is `gotodo`.
 
@@ -170,7 +170,7 @@ Pushing a tag that matches the version in `Cargo.toml` builds, tests and
 publishes `amd64` and `arm64` packages:
 
 ```sh
-git tag v0.0.9 && git push origin v0.0.9
+git tag v0.0.10 && git push origin v0.0.10
 ```
 
 Inter is licensed under the SIL Open Font License, see `assets/fonts/OFL.txt`.
