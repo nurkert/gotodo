@@ -63,8 +63,6 @@ pub fn quick_transparent() -> bool {
     static SEE_THROUGH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *SEE_THROUGH.get_or_init(|| std::env::var_os("GOTODO_OPAQUE").is_none())
 }
-/// The most see-through the Quick Entry card gets.
-const QUICK_MIN_OPACITY: f32 = 0.72;
 pub const SIDEBAR_MIN: f32 = 180.0;
 const COMPACT_BELOW: f32 = 700.0;
 const RAIL_WIDTH: f32 = 56.0;
@@ -559,16 +557,8 @@ impl App {
         iced::Color { a: self.prefs.sidebar_opacity.clamp(crate::prefs::MIN_OPACITY, 1.0), ..p.sidebar }
     }
 
-    /// Quick Entry floats over anything, often a bright browser page, and its
-    /// text is the whole point. So the slider only spans 72 to 100 % of real
-    /// opacity: enough to see the blur, never enough to wash out the text.
     pub fn quick_opacity(&self) -> f32 {
-        if !quick_transparent() {
-            return 1.0;
-        }
-        let chosen = self.prefs.quick_opacity.clamp(crate::prefs::MIN_OPACITY, 1.0);
-        let k = (chosen - crate::prefs::MIN_OPACITY) / (1.0 - crate::prefs::MIN_OPACITY);
-        QUICK_MIN_OPACITY + (1.0 - QUICK_MIN_OPACITY) * k
+        if quick_transparent() { self.prefs.quick_opacity.clamp(crate::prefs::MIN_OPACITY, 1.0) } else { 1.0 }
     }
 
     pub fn theme(&self, _: window::Id) -> Theme {
